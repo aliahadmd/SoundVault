@@ -26,11 +26,20 @@ data class PlayerPreferencesData(
     val isNightMode: Boolean = true
 )
 
+/** Playback state owned and written by [PlaybackService]. */
+data class PlaybackSnapshot(
+    val trackUri: String?,
+    val positionMs: Long,
+    val shuffleEnabled: Boolean,
+    val repeatMode: Int,
+    val playbackSpeed: Float
+)
+
 class PlayerPreferences(context: Context) {
 
-    private val dataStore = context.playerPreferencesDataStore
+    private val dataStore = context.applicationContext.playerPreferencesDataStore
 
-    val preferencesFlow: Flow<PlayerPreferencesData> = dataStore.data.map { preferences ->
+    private val preferencesFlow: Flow<PlayerPreferencesData> = dataStore.data.map { preferences ->
         PlayerPreferencesData(
             folderUri = preferences[FOLDER_URI_KEY],
             currentTrackUri = preferences[CURRENT_TRACK_URI_KEY],
@@ -44,34 +53,27 @@ class PlayerPreferences(context: Context) {
 
     suspend fun getPreferences(): PlayerPreferencesData = preferencesFlow.first()
 
-    suspend fun saveState(
-        folderUri: Uri?,
-        trackUri: Uri?,
-        positionMs: Long,
-        shuffleEnabled: Boolean,
-        repeatMode: Int,
-        playbackSpeed: Float
-    ) {
+    /** Saves the selected folder and resets the track/position so a new folder starts at its top. */
+    suspend fun saveFolder(folderUri: Uri) {
         dataStore.edit { preferences ->
-            if (folderUri == null) {
-                preferences.remove(FOLDER_URI_KEY)
-            } else {
-                preferences[FOLDER_URI_KEY] = folderUri.toString()
-            }
-            if (trackUri == null) {
-                preferences.remove(CURRENT_TRACK_URI_KEY)
-            } else {
-                preferences[CURRENT_TRACK_URI_KEY] = trackUri.toString()
-            }
-            preferences[POSITION_MS_KEY] = positionMs
-            preferences[SHUFFLE_ENABLED_KEY] = shuffleEnabled
-            preferences[REPEAT_MODE_KEY] = repeatMode
-            preferences[PLAYBACK_SPEED_KEY] = playbackSpeed
+            preferences[FOLDER_URI_KEY] = folderUri.toString()
+            preferences.remove(CURRENT_TRACK_URI_KEY)
+            preferences[POSITION_MS_KEY] = 0L
         }
     }
 
-    suspend fun clear() {
-        dataStore.edit { it.clear() }
+    suspend fun savePlaybackState(snapshot: PlaybackSnapshot) {
+        dataStore.edit { preferences ->
+            if (snapshot.trackUri == null) {
+                preferences.remove(CURRENT_TRACK_URI_KEY)
+            } else {
+                preferences[CURRENT_TRACK_URI_KEY] = snapshot.trackUri
+            }
+            preferences[POSITION_MS_KEY] = snapshot.positionMs
+            preferences[SHUFFLE_ENABLED_KEY] = snapshot.shuffleEnabled
+            preferences[REPEAT_MODE_KEY] = snapshot.repeatMode
+            preferences[PLAYBACK_SPEED_KEY] = snapshot.playbackSpeed
+        }
     }
 
     suspend fun clearPlaybackState() {

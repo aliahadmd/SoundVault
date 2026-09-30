@@ -1,4 +1,66 @@
 <resources>
     <string name="app_name">SoundVault</string>
     <string name="notification_channel_name">Audio playback</string>
+
+    <!-- Now playing -->
+    <string name="now_playing_placeholder">Select a folder to start</string>
+    <string name="status_loading">Building your playlist…</string>
+    <string name="status_no_track">Tap the folder icon to choose your music.</string>
+    <string name="status_playing">Now playing</string>
+    <string name="status_ready">Ready to play</string>
+    <string name="action_details">Details</string>
+    <string name="action_choose_folder">Choose folder</string>
+    <string name="action_change_folder">Change folder</string>
+    <string name="cd_switch_to_light">Switch to Light mode</string>
+    <string name="cd_switch_to_night">Switch to Night mode</string>
+
+    <!-- Playlist -->
+    <string name="playlist_title">Playlist</string>
+    <plurals name="playlist_track_count">
+        <item quantity="one">%d track</item>
+        <item quantity="other">%d tracks</item>
+    </plurals>
+    <string name="empty_title">Your playlist is waiting</string>
+    <string name="empty_body">Pick a folder with audio files and we’ll build a playlist automatically.</string>
+    <string name="action_browse_folders">Browse folders</string>
+
+    <!-- Playback controls -->
+    <string name="time_progress">%1$s / %2$s</string>
+    <string name="time_unknown">--:--</string>
+    <string name="cd_minimize_controls">Minimize controls</string>
+    <string name="cd_maximize_controls">Maximize controls</string>
+    <string name="cd_previous">Previous</string>
+    <string name="cd_play">Play</string>
+    <string name="cd_pause">Pause</string>
+    <string name="cd_next">Next</string>
+    <string name="cd_stop">Stop</string>
+    <string name="cd_toggle_shuffle">Toggle shuffle</string>
+    <string name="cd_cycle_repeat">Cycle repeat mode</string>
+    <string name="cd_add_bookmark">Add bookmark</string>
+
+    <!-- Bookmarks -->
+    <string name="bookmark_dialog_title">Add Bookmark</string>
+    <string name="bookmark_dialog_position">Position: %1$s</string>
+    <string name="bookmark_note_label">Note (optional)</string>
+    <string name="action_save">Save</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="bookmarks_title">Bookmarks</string>
+    <string name="cd_collapse_bookmarks">Collapse bookmarks</string>
+    <string name="cd_expand_bookmarks">Expand bookmarks</string>
+    <string name="cd_delete_bookmark">Delete bookmark</string>
+
+    <!-- Track details -->
+    <string name="details_title">Track details</string>
+    <string name="details_label_title">Title</string>
+    <string name="details_label_artist">Artist</string>
+    <string name="details_label_album">Album</string>
+    <string name="details_label_duration">Duration</string>
+    <string name="details_label_file_size">File size</string>
+    <string name="details_label_location">Location</string>
+
+    <!-- Errors -->
+    <string name="error_no_audio_in_folder">No audio files found in the selected folder.</string>
+    <string name="error_saved_folder_empty">We couldn\'t find audio in the saved folder. Please choose another folder.</string>
+    <string name="error_playback_failed">Couldn\'t play “%1$s”.</string>
+    <string name="error_player_unavailable">The player couldn\'t start. Please reopen the app.</string>
 </resources>

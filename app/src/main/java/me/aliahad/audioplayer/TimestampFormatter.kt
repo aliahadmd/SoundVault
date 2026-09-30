@@ -3,7 +3,7 @@ package me.aliahad.audioplayer
 import java.util.Locale
 
 fun formatTimestamp(positionMs: Long): String {
-    val totalSeconds = positionMs / 1000
+    val totalSeconds = positionMs.coerceAtLeast(0L) / 1000
     val hours = (totalSeconds / 3600).toInt()
     val minutes = ((totalSeconds % 3600) / 60).toInt()
     val seconds = (totalSeconds % 60).toInt()
