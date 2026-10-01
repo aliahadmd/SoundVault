@@ -5,7 +5,7 @@
     <!-- Now playing -->
     <string name="now_playing_placeholder">Select a folder to start</string>
     <string name="status_loading">Building your playlist…</string>
-    <string name="status_no_track">Tap the folder icon to choose your music.</string>
+    <string name="status_no_track">Tap Choose folder to pick your music.</string>
     <string name="status_playing">Now playing</string>
     <string name="status_ready">Ready to play</string>
     <string name="action_details">Details</string>
@@ -37,6 +37,31 @@
     <string name="cd_toggle_shuffle">Toggle shuffle</string>
     <string name="cd_cycle_repeat">Cycle repeat mode</string>
     <string name="cd_add_bookmark">Add bookmark</string>
+    <plurals name="cd_skip_back_seconds">
+        <item quantity="one">Skip back %d second</item>
+        <item quantity="other">Skip back %d seconds</item>
+    </plurals>
+    <plurals name="cd_skip_back_minutes">
+        <item quantity="one">Skip back %d minute</item>
+        <item quantity="other">Skip back %d minutes</item>
+    </plurals>
+    <plurals name="cd_skip_forward_seconds">
+        <item quantity="one">Skip forward %d second</item>
+        <item quantity="other">Skip forward %d seconds</item>
+    </plurals>
+    <plurals name="cd_skip_forward_minutes">
+        <item quantity="one">Skip forward %d minute</item>
+        <item quantity="other">Skip forward %d minutes</item>
+    </plurals>
+
+    <!-- Settings -->
+    <string name="cd_settings">Settings</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_skip_back">Skip back</string>
+    <string name="settings_skip_forward">Skip forward</string>
+    <string name="settings_skip_hint">Also used by the notification, lock screen and headset buttons.</string>
+    <string name="skip_interval_seconds">%1$d s</string>
+    <string name="skip_interval_minutes">%1$d min</string>
 
     <!-- Bookmarks -->
     <string name="bookmark_dialog_title">Add Bookmark</string>

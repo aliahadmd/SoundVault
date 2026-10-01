@@ -55,6 +55,7 @@ data class PlayerUiState(
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val playbackSpeed: Float = 1f,
     val isNightMode: Boolean = true,
+    val skipIntervals: SkipIntervals = SkipIntervals(),
     val timestamps: List<TimestampBookmark> = emptyList(),
     val bookmarkDraft: BookmarkDraft? = null
 ) {
@@ -120,6 +121,9 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
         viewModelScope.launch { restoreSession() }
         observeBookmarksForCurrentTrack()
+        viewModelScope.launch {
+            preferences.skipIntervals.collect { intervals -> _uiState.update { it.copy(skipIntervals = intervals) } }
+        }
     }
 
     fun toggleTheme() {
@@ -210,6 +214,36 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
         val player = controller ?: return
         val duration = player.duration.takeIf { it != C.TIME_UNSET && it >= 0 } ?: Long.MAX_VALUE
         player.seekTo(positionMs.coerceIn(0L, duration))
+        updateProgress()
+    }
+
+    fun skipBack() = skipBy(-_uiState.value.skipIntervals.backMs)
+
+    fun skipForward() = skipBy(_uiState.value.skipIntervals.forwardMs)
+
+    fun setSkipBackInterval(intervalMs: Long) {
+        viewModelScope.launch {
+            runCatching { preferences.saveSkipBackInterval(intervalMs) }
+                .onFailure { Log.w(TAG, "Failed to persist skip back interval", it) }
+        }
+    }
+
+    fun setSkipForwardInterval(intervalMs: Long) {
+        viewModelScope.launch {
+            runCatching { preferences.saveSkipForwardInterval(intervalMs) }
+                .onFailure { Log.w(TAG, "Failed to persist skip forward interval", it) }
+        }
+    }
+
+    /**
+     * Seeks by an explicit offset rather than calling MediaController.seekBack(): the controller would
+     * mask the position with the increment it cached at connect time, which is stale after a Settings change.
+     * The service applies the same rule for notification, lock-screen and headset skips.
+     */
+    private fun skipBy(offsetMs: Long) {
+        val player = controller ?: return
+        if (player.mediaItemCount == 0) return
+        player.seekTo(skipTargetPosition(player.currentPosition, player.duration.takeIf { it != C.TIME_UNSET }, offsetMs))
         updateProgress()
     }
 

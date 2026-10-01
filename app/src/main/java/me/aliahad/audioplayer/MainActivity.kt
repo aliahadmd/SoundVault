@@ -53,6 +53,8 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
@@ -74,7 +76,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SheetState
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
@@ -93,15 +98,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
@@ -158,10 +169,14 @@ class MainActivity : ComponentActivity() {
                     onStop = viewModel::stopPlayback,
                     onSelectTrack = viewModel::selectTrack,
                     onSeekTo = viewModel::seekTo,
+                    onSkipBack = viewModel::skipBack,
+                    onSkipForward = viewModel::skipForward,
                     onToggleShuffle = viewModel::toggleShuffle,
                     onCycleRepeatMode = viewModel::cycleRepeatMode,
                     onCyclePlaybackSpeed = viewModel::cyclePlaybackSpeed,
                     onToggleTheme = viewModel::toggleTheme,
+                    onSetSkipBackInterval = viewModel::setSkipBackInterval,
+                    onSetSkipForwardInterval = viewModel::setSkipForwardInterval,
                     onBookmarkTap = viewModel::onBookmarkTap,
                     onSaveBookmark = viewModel::saveBookmark,
                     onDismissBookmarkDialog = viewModel::dismissBookmarkDialog,
@@ -200,10 +215,14 @@ fun AudioPlayerScreen(
     onStop: () -> Unit,
     onSelectTrack: (Int) -> Unit,
     onSeekTo: (Long) -> Unit,
+    onSkipBack: () -> Unit,
+    onSkipForward: () -> Unit,
     onToggleShuffle: () -> Unit,
     onCycleRepeatMode: () -> Unit,
     onCyclePlaybackSpeed: () -> Unit,
     onToggleTheme: () -> Unit,
+    onSetSkipBackInterval: (Long) -> Unit,
+    onSetSkipForwardInterval: (Long) -> Unit,
     onBookmarkTap: () -> Unit,
     onSaveBookmark: (String?) -> Unit,
     onDismissBookmarkDialog: () -> Unit,
@@ -213,6 +232,7 @@ fun AudioPlayerScreen(
 ) {
     val currentTrack = uiState.tracks.getOrNull(uiState.currentTrackIndex)
     val hasTracks = uiState.tracks.isNotEmpty()
+    var showSettings by rememberSaveable { mutableStateOf(false) }
     val backgroundBrush = Brush.verticalGradient(
         colors = listOf(
             MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -245,10 +265,12 @@ fun AudioPlayerScreen(
                                 )
                             )
                         }
-                        IconButton(onClick = onChooseFolder) {
+                        // Folder picking lives in the Now Playing card and the empty state, so the
+                        // second app-bar slot holds Settings (three actions would clip the centred title).
+                        IconButton(onClick = { showSettings = true }) {
                             Icon(
-                                imageVector = Icons.Rounded.FolderOpen,
-                                contentDescription = stringResource(R.string.action_choose_folder)
+                                imageVector = Icons.Rounded.Settings,
+                                contentDescription = stringResource(R.string.cd_settings)
                             )
                         }
                     }
@@ -280,6 +302,15 @@ fun AudioPlayerScreen(
                         track = currentTrack,
                         sheetState = sheetState,
                         onDismiss = { showDetails = false }
+                    )
+                }
+
+                if (showSettings) {
+                    SettingsSheet(
+                        skipIntervals = uiState.skipIntervals,
+                        onSetSkipBackInterval = onSetSkipBackInterval,
+                        onSetSkipForwardInterval = onSetSkipForwardInterval,
+                        onDismiss = { showSettings = false }
                     )
                 }
 
@@ -319,11 +350,14 @@ fun AudioPlayerScreen(
                     isShuffleEnabled = uiState.isShuffleEnabled,
                     repeatMode = uiState.repeatMode,
                     playbackSpeed = uiState.playbackSpeed,
+                    skipIntervals = uiState.skipIntervals,
                     onPlayPause = onPlayPause,
                     onNext = onNext,
                     onPrevious = onPrevious,
                     onStop = onStop,
                     onSeekTo = onSeekTo,
+                    onSkipBack = onSkipBack,
+                    onSkipForward = onSkipForward,
                     onToggleShuffle = onToggleShuffle,
                     onCycleRepeatMode = onCycleRepeatMode,
                     onCyclePlaybackSpeed = onCyclePlaybackSpeed,
@@ -692,11 +726,14 @@ private fun PlaybackControls(
     isShuffleEnabled: Boolean,
     repeatMode: Int,
     playbackSpeed: Float,
+    skipIntervals: SkipIntervals,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
     onStop: () -> Unit,
     onSeekTo: (Long) -> Unit,
+    onSkipBack: () -> Unit,
+    onSkipForward: () -> Unit,
     onToggleShuffle: () -> Unit,
     onCycleRepeatMode: () -> Unit,
     onCyclePlaybackSpeed: () -> Unit,
@@ -753,11 +790,13 @@ private fun PlaybackControls(
             TransportControls(
                 isPlaying = isPlaying,
                 hasTracks = hasTracks,
-                showStop = controlsExpanded,
+                isExpanded = controlsExpanded,
+                skipIntervals = skipIntervals,
                 onPlayPause = onPlayPause,
                 onNext = onNext,
                 onPrevious = onPrevious,
-                onStop = onStop
+                onSkipBack = onSkipBack,
+                onSkipForward = onSkipForward
             )
 
             AnimatedVisibility(
@@ -773,7 +812,8 @@ private fun PlaybackControls(
                     onToggleShuffle = onToggleShuffle,
                     onCycleRepeatMode = onCycleRepeatMode,
                     onCyclePlaybackSpeed = onCyclePlaybackSpeed,
-                    onBookmarkTap = onBookmarkTap
+                    onBookmarkTap = onBookmarkTap,
+                    onStop = onStop
                 )
             }
         }
@@ -837,26 +877,29 @@ private fun PlaybackControlHeader(
 private fun TransportControls(
     isPlaying: Boolean,
     hasTracks: Boolean,
-    showStop: Boolean,
+    isExpanded: Boolean,
+    skipIntervals: SkipIntervals,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
-    onStop: () -> Unit
+    onSkipBack: () -> Unit,
+    onSkipForward: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
-    val controlSize = if (showStop) 48.dp else 44.dp
-    val playSize = if (showStop) 56.dp else 52.dp
-    val playIconSize = if (showStop) 28.dp else 26.dp
+    val controlSize = if (isExpanded) 48.dp else 44.dp
+    val playSize = if (isExpanded) 56.dp else 52.dp
+    val playIconSize = if (isExpanded) 28.dp else 26.dp
 
+    // Five controls at 8 dp spacing stay within a 360 dp-wide screen even when expanded.
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 12.dp, end = 12.dp, bottom = if (showStop) 0.dp else 12.dp),
+            .padding(start = 12.dp, end = 12.dp, bottom = if (isExpanded) 0.dp else 12.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             FilledTonalIconButton(
@@ -869,6 +912,13 @@ private fun TransportControls(
             ) {
                 Icon(imageVector = Icons.Rounded.SkipPrevious, contentDescription = stringResource(R.string.cd_previous))
             }
+            SkipButton(
+                intervalMs = skipIntervals.backMs,
+                forward = false,
+                enabled = hasTracks,
+                size = controlSize,
+                onClick = onSkipBack
+            )
             FilledIconButton(
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -889,6 +939,13 @@ private fun TransportControls(
                     modifier = Modifier.size(playIconSize)
                 )
             }
+            SkipButton(
+                intervalMs = skipIntervals.forwardMs,
+                forward = true,
+                enabled = hasTracks,
+                size = controlSize,
+                onClick = onSkipForward
+            )
             FilledTonalIconButton(
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -899,18 +956,53 @@ private fun TransportControls(
             ) {
                 Icon(imageVector = Icons.Rounded.SkipNext, contentDescription = stringResource(R.string.cd_next))
             }
-            if (showStop) {
-                FilledTonalIconButton(
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onStop()
-                    },
-                    enabled = hasTracks,
-                    modifier = Modifier.size(controlSize)
-                ) {
-                    Icon(imageVector = Icons.Rounded.Stop, contentDescription = stringResource(R.string.cd_stop))
-                }
-            }
+        }
+    }
+}
+
+/**
+ * Circular-arrow skip button with the step in seconds drawn inside, like Material's replay_10 /
+ * forward_10 (which only exist for some steps). The digits are sized in dp, not sp, so large font
+ * settings cannot push them out of the circle; TalkBack reads the full description instead.
+ */
+@Composable
+private fun SkipButton(
+    intervalMs: Long,
+    forward: Boolean,
+    enabled: Boolean,
+    size: Dp,
+    onClick: () -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    val description = skipIntervalDescription(LocalContext.current.resources, intervalMs, forward)
+    val digitSize = with(LocalDensity.current) { 10.dp.toSp() }
+    IconButton(
+        onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            onClick()
+        },
+        enabled = enabled,
+        modifier = Modifier
+            .size(size)
+            .semantics { contentDescription = description }
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = Icons.Rounded.Replay,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(34.dp)
+                    // Mirrored, the replay arrow is Material's forward arrow.
+                    .graphicsLayer { if (forward) scaleX = -1f }
+            )
+            Text(
+                text = (intervalMs / 1_000L).toString(),
+                fontSize = digitSize,
+                lineHeight = digitSize,
+                fontWeight = FontWeight.Bold,
+                // The arrow's circle sits slightly below the icon's centre.
+                modifier = Modifier.padding(top = 3.dp)
+            )
         }
     }
 }
@@ -924,7 +1016,8 @@ private fun SecondaryPlaybackControls(
     onToggleShuffle: () -> Unit,
     onCycleRepeatMode: () -> Unit,
     onCyclePlaybackSpeed: () -> Unit,
-    onBookmarkTap: () -> Unit
+    onBookmarkTap: () -> Unit,
+    onStop: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
 
@@ -1013,6 +1106,18 @@ private fun SecondaryPlaybackControls(
             modifier = Modifier.size(44.dp)
         ) {
             Icon(imageVector = Icons.Rounded.BookmarkAdd, contentDescription = stringResource(R.string.cd_add_bookmark))
+        }
+
+        // Stop moved here from the transport row, which now holds the skip buttons.
+        FilledTonalIconButton(
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onStop()
+            },
+            enabled = hasTracks,
+            modifier = Modifier.size(44.dp)
+        ) {
+            Icon(imageVector = Icons.Rounded.Stop, contentDescription = stringResource(R.string.cd_stop))
         }
     }
 }
@@ -1337,6 +1442,90 @@ private fun TimestampListSection(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+private fun SettingsSheet(
+    skipIntervals: SkipIntervals,
+    onSetSkipBackInterval: (Long) -> Unit,
+    onSetSkipForwardInterval: (Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.settings_title),
+                style = MaterialTheme.typography.titleLarge
+            )
+            SkipIntervalSetting(
+                label = stringResource(R.string.settings_skip_back),
+                selectedMs = skipIntervals.backMs,
+                onSelect = onSetSkipBackInterval
+            )
+            SkipIntervalSetting(
+                label = stringResource(R.string.settings_skip_forward),
+                selectedMs = skipIntervals.forwardMs,
+                onSelect = onSetSkipForwardInterval
+            )
+            Text(
+                text = stringResource(R.string.settings_skip_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SkipIntervalSetting(
+    label: String,
+    selectedMs: Long,
+    onSelect: (Long) -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        SingleChoiceSegmentedButtonRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = label }
+        ) {
+            SKIP_INTERVAL_OPTIONS_MS.forEachIndexed { index, option ->
+                SegmentedButton(
+                    selected = option == selectedMs,
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onSelect(option)
+                    },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = SKIP_INTERVAL_OPTIONS_MS.size)
+                ) {
+                    val parts = skipIntervalLabel(option)
+                    Text(
+                        text = stringResource(
+                            if (parts.inMinutes) R.string.skip_interval_minutes else R.string.skip_interval_seconds,
+                            parts.amount
+                        ),
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 private fun TrackDetailsSheet(
     track: AudioTrack,
     sheetState: SheetState,
@@ -1458,10 +1647,14 @@ private fun AudioPlayerScreenPreview() {
             onStop = {},
             onSelectTrack = {},
             onSeekTo = {},
+            onSkipBack = {},
+            onSkipForward = {},
             onToggleShuffle = {},
             onCycleRepeatMode = {},
             onCyclePlaybackSpeed = {},
             onToggleTheme = {},
+            onSetSkipBackInterval = {},
+            onSetSkipForwardInterval = {},
             onBookmarkTap = {},
             onSaveBookmark = {},
             onDismissBookmarkDialog = {},

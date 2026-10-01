@@ -11,8 +11,11 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.media3.common.Player
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import java.io.IOException
 
 private val Context.playerPreferencesDataStore by preferencesDataStore(name = "player_preferences")
 
@@ -52,6 +55,31 @@ class PlayerPreferences(context: Context) {
     }
 
     suspend fun getPreferences(): PlayerPreferencesData = preferencesFlow.first()
+
+    /**
+     * Skip step sizes, observed by both the UI and [PlaybackService]. Unknown stored values fall back to
+     * the default, and a read error emits the defaults instead of failing the collector.
+     */
+    val skipIntervals: Flow<SkipIntervals> = dataStore.data
+        .map { preferences ->
+            SkipIntervals(
+                backMs = sanitizeSkipInterval(preferences[SKIP_BACK_MS_KEY]),
+                forwardMs = sanitizeSkipInterval(preferences[SKIP_FORWARD_MS_KEY])
+            )
+        }
+        .catch { error ->
+            if (error !is IOException) throw error
+            emit(SkipIntervals())
+        }
+        .distinctUntilChanged()
+
+    suspend fun saveSkipBackInterval(intervalMs: Long) {
+        dataStore.edit { preferences -> preferences[SKIP_BACK_MS_KEY] = sanitizeSkipInterval(intervalMs) }
+    }
+
+    suspend fun saveSkipForwardInterval(intervalMs: Long) {
+        dataStore.edit { preferences -> preferences[SKIP_FORWARD_MS_KEY] = sanitizeSkipInterval(intervalMs) }
+    }
 
     /** Saves the selected folder and resets the track/position so a new folder starts at its top. */
     suspend fun saveFolder(folderUri: Uri) {
@@ -101,5 +129,7 @@ class PlayerPreferences(context: Context) {
         val REPEAT_MODE_KEY = intPreferencesKey("repeat_mode")
         val PLAYBACK_SPEED_KEY = floatPreferencesKey("playback_speed")
         val IS_NIGHT_MODE_KEY = booleanPreferencesKey("is_night_mode")
+        val SKIP_BACK_MS_KEY = longPreferencesKey("skip_back_ms")
+        val SKIP_FORWARD_MS_KEY = longPreferencesKey("skip_forward_ms")
     }
 }
