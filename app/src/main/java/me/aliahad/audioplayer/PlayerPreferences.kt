@@ -81,6 +81,39 @@ class PlayerPreferences(context: Context) {
         dataStore.edit { preferences -> preferences[SKIP_FORWARD_MS_KEY] = sanitizeSkipInterval(intervalMs) }
     }
 
+    /**
+     * Equalizer and bass booster state, observed by [PlaybackService] (which applies it to the audio) and
+     * by the UI. Stored values are repaired on read, and a read error emits the neutral defaults.
+     */
+    val equalizer: Flow<EqualizerSettings> = dataStore.data
+        .map { preferences ->
+            sanitizeEqualizerSettings(
+                EqualizerSettings(
+                    enabled = preferences[EQ_ENABLED_KEY] ?: true,
+                    presetId = preferences[EQ_PRESET_KEY] ?: EqPreset.FLAT.id,
+                    bandGainsDb = decodeBandGains(preferences[EQ_BANDS_KEY]),
+                    bassBoostPercent = preferences[EQ_BASS_BOOST_KEY] ?: 0,
+                    loudnessPercent = preferences[EQ_LOUDNESS_KEY] ?: 0
+                )
+            )
+        }
+        .catch { error ->
+            if (error !is IOException) throw error
+            emit(EqualizerSettings())
+        }
+        .distinctUntilChanged()
+
+    suspend fun saveEqualizer(settings: EqualizerSettings) {
+        val sanitized = sanitizeEqualizerSettings(settings)
+        dataStore.edit { preferences ->
+            preferences[EQ_ENABLED_KEY] = sanitized.enabled
+            preferences[EQ_PRESET_KEY] = sanitized.presetId
+            preferences[EQ_BANDS_KEY] = encodeBandGains(sanitized.bandGainsDb)
+            preferences[EQ_BASS_BOOST_KEY] = sanitized.bassBoostPercent
+            preferences[EQ_LOUDNESS_KEY] = sanitized.loudnessPercent
+        }
+    }
+
     /** Saves the selected folder and resets the track/position so a new folder starts at its top. */
     suspend fun saveFolder(folderUri: Uri) {
         dataStore.edit { preferences ->
@@ -131,5 +164,10 @@ class PlayerPreferences(context: Context) {
         val IS_NIGHT_MODE_KEY = booleanPreferencesKey("is_night_mode")
         val SKIP_BACK_MS_KEY = longPreferencesKey("skip_back_ms")
         val SKIP_FORWARD_MS_KEY = longPreferencesKey("skip_forward_ms")
+        val EQ_ENABLED_KEY = booleanPreferencesKey("eq_enabled")
+        val EQ_PRESET_KEY = stringPreferencesKey("eq_preset")
+        val EQ_BANDS_KEY = stringPreferencesKey("eq_band_gains_db")
+        val EQ_BASS_BOOST_KEY = intPreferencesKey("eq_bass_boost_percent")
+        val EQ_LOUDNESS_KEY = intPreferencesKey("eq_loudness_percent")
     }
 }

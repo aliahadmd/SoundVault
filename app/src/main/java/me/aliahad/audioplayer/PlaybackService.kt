@@ -52,11 +52,17 @@ class PlaybackService : MediaSessionService() {
     private var persistJob: Job? = null
     private var consecutiveErrors = 0
 
+    /** Equalizer and bass booster, applied inside the player's audio sink. */
+    private val equalizer = EqualizerAudioProcessor()
+
     override fun onCreate() {
         super.onCreate()
         preferences = PlayerPreferences(applicationContext)
 
-        player = ExoPlayer.Builder(this)
+        // Apply the equalizer settings as soon as they are read, and again on every change.
+        serviceScope.launch { preferences.equalizer.collect(equalizer::setSettings) }
+
+        player = ExoPlayer.Builder(this, EqualizerRenderersFactory(this, equalizer))
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)

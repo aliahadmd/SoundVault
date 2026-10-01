@@ -56,6 +56,7 @@ data class PlayerUiState(
     val playbackSpeed: Float = 1f,
     val isNightMode: Boolean = true,
     val skipIntervals: SkipIntervals = SkipIntervals(),
+    val equalizer: EqualizerSettings = EqualizerSettings(),
     val timestamps: List<TimestampBookmark> = emptyList(),
     val bookmarkDraft: BookmarkDraft? = null
 ) {
@@ -75,6 +76,12 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
+
+    /**
+     * The latest equalizer state the user chose that may not be saved yet; null until the first edit.
+     * Declared before `init`, which starts the loop that saves it.
+     */
+    private val pendingEqualizer = MutableStateFlow<EqualizerSettings?>(null)
 
     private val controllerFuture: ListenableFuture<MediaController>
     private val connectedController = CompletableDeferred<MediaController>()
@@ -124,6 +131,7 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             preferences.skipIntervals.collect { intervals -> _uiState.update { it.copy(skipIntervals = intervals) } }
         }
+        observeEqualizer()
     }
 
     fun toggleTheme() {
@@ -234,6 +242,51 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 .onFailure { Log.w(TAG, "Failed to persist skip forward interval", it) }
         }
     }
+
+    /**
+     * Sliders update [PlayerUiState.equalizer] at once and are saved in the background. The service hears
+     * the saved value, so it always plays what was last stored. A StateFlow drops intermediate values, so
+     * a fast drag never queues up writes, and saved values older than the latest edit are not echoed back
+     * into the UI (which would make a slider jump back while it is being dragged).
+     */
+    private fun observeEqualizer() {
+        viewModelScope.launch {
+            preferences.equalizer.collect { saved ->
+                val pending = pendingEqualizer.value
+                if (pending == null || pending == saved) _uiState.update { it.copy(equalizer = saved) }
+            }
+        }
+        viewModelScope.launch {
+            pendingEqualizer.collect { settings ->
+                if (settings != null) {
+                    runCatching { preferences.saveEqualizer(settings) }
+                        .onFailure { Log.w(TAG, "Failed to persist equalizer settings", it) }
+                }
+            }
+        }
+    }
+
+    private fun updateEqualizer(transform: (EqualizerSettings) -> EqualizerSettings) {
+        val next = sanitizeEqualizerSettings(transform(_uiState.value.equalizer))
+        _uiState.update { it.copy(equalizer = next) }
+        pendingEqualizer.value = next
+    }
+
+    fun setEqualizerEnabled(enabled: Boolean) = updateEqualizer { it.copy(enabled = enabled) }
+
+    // Touching any sound control switches the equalizer on, so a change is always audible.
+
+    fun selectEqualizerPreset(preset: EqPreset) = updateEqualizer { it.withPreset(preset).copy(enabled = true) }
+
+    fun setEqualizerBand(band: Int, gainDb: Double) =
+        updateEqualizer { it.withBandGain(band, gainDb).copy(enabled = true) }
+
+    fun setBassBoost(percent: Int) = updateEqualizer { it.copy(bassBoostPercent = percent, enabled = true) }
+
+    fun setLoudness(percent: Int) = updateEqualizer { it.copy(loudnessPercent = percent, enabled = true) }
+
+    /** Flat bands and no bass boost or loudness; the on/off switch is left as it is. */
+    fun resetEqualizer() = updateEqualizer { EqualizerSettings(enabled = it.enabled) }
 
     /**
      * Seeks by an explicit offset rather than calling MediaController.seekBack(): the controller would

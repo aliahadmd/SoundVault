@@ -177,6 +177,12 @@ class MainActivity : ComponentActivity() {
                     onToggleTheme = viewModel::toggleTheme,
                     onSetSkipBackInterval = viewModel::setSkipBackInterval,
                     onSetSkipForwardInterval = viewModel::setSkipForwardInterval,
+                    onSetEqualizerEnabled = viewModel::setEqualizerEnabled,
+                    onSelectEqualizerPreset = viewModel::selectEqualizerPreset,
+                    onSetEqualizerBand = viewModel::setEqualizerBand,
+                    onSetBassBoost = viewModel::setBassBoost,
+                    onSetLoudness = viewModel::setLoudness,
+                    onResetEqualizer = viewModel::resetEqualizer,
                     onBookmarkTap = viewModel::onBookmarkTap,
                     onSaveBookmark = viewModel::saveBookmark,
                     onDismissBookmarkDialog = viewModel::dismissBookmarkDialog,
@@ -228,11 +234,18 @@ fun AudioPlayerScreen(
     onDismissBookmarkDialog: () -> Unit,
     onSeekToTimestamp: (Long) -> Unit,
     onDeleteTimestamp: (Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onSetEqualizerEnabled: (Boolean) -> Unit = {},
+    onSelectEqualizerPreset: (EqPreset) -> Unit = {},
+    onSetEqualizerBand: (Int, Double) -> Unit = { _, _ -> },
+    onSetBassBoost: (Int) -> Unit = {},
+    onSetLoudness: (Int) -> Unit = {},
+    onResetEqualizer: () -> Unit = {}
 ) {
     val currentTrack = uiState.tracks.getOrNull(uiState.currentTrackIndex)
     val hasTracks = uiState.tracks.isNotEmpty()
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showEqualizer by rememberSaveable { mutableStateOf(false) }
     val backgroundBrush = Brush.verticalGradient(
         colors = listOf(
             MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -314,6 +327,19 @@ fun AudioPlayerScreen(
                     )
                 }
 
+                if (showEqualizer) {
+                    EqualizerSheet(
+                        settings = uiState.equalizer,
+                        onSetEnabled = onSetEqualizerEnabled,
+                        onSelectPreset = onSelectEqualizerPreset,
+                        onSetBand = onSetEqualizerBand,
+                        onSetBassBoost = onSetBassBoost,
+                        onSetLoudness = onSetLoudness,
+                        onReset = onResetEqualizer,
+                        onDismiss = { showEqualizer = false }
+                    )
+                }
+
                 NowPlayingCard(
                     currentTrack = currentTrack,
                     isPlaying = uiState.isPlaying,
@@ -361,7 +387,9 @@ fun AudioPlayerScreen(
                     onToggleShuffle = onToggleShuffle,
                     onCycleRepeatMode = onCycleRepeatMode,
                     onCyclePlaybackSpeed = onCyclePlaybackSpeed,
-                    onBookmarkTap = onBookmarkTap
+                    onBookmarkTap = onBookmarkTap,
+                    equalizerActive = !uiState.equalizer.isNeutral,
+                    onOpenEqualizer = { showEqualizer = true }
                 )
 
                 uiState.bookmarkDraft?.let { draft ->
@@ -737,7 +765,9 @@ private fun PlaybackControls(
     onToggleShuffle: () -> Unit,
     onCycleRepeatMode: () -> Unit,
     onCyclePlaybackSpeed: () -> Unit,
-    onBookmarkTap: () -> Unit
+    onBookmarkTap: () -> Unit,
+    equalizerActive: Boolean,
+    onOpenEqualizer: () -> Unit
 ) {
     var controlsExpanded by rememberSaveable { mutableStateOf(false) }
 
@@ -757,7 +787,9 @@ private fun PlaybackControls(
                 currentPosition = currentPosition,
                 duration = duration,
                 isExpanded = controlsExpanded,
-                onToggleExpanded = { controlsExpanded = !controlsExpanded }
+                onToggleExpanded = { controlsExpanded = !controlsExpanded },
+                equalizerActive = equalizerActive,
+                onOpenEqualizer = onOpenEqualizer
             )
 
             AnimatedVisibility(
@@ -825,7 +857,9 @@ private fun PlaybackControlHeader(
     currentPosition: Long,
     duration: Long,
     isExpanded: Boolean,
-    onToggleExpanded: () -> Unit
+    onToggleExpanded: () -> Unit,
+    equalizerActive: Boolean,
+    onOpenEqualizer: () -> Unit
 ) {
     val safeDuration = duration.takeIf { it > 0L } ?: 0L
     val timeLabel = if (safeDuration > 0L) {
@@ -845,16 +879,28 @@ private fun PlaybackControlHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, top = 10.dp, end = 8.dp),
+            .padding(start = 8.dp, top = 10.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Icon(
-            imageVector = Icons.Rounded.GraphicEq,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp)
-        )
+        // One tap to the equalizer and bass boost; filled while it is shaping the sound.
+        FilledTonalIconButton(
+            onClick = onOpenEqualizer,
+            colors = if (equalizerActive) {
+                IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            } else {
+                IconButtonDefaults.filledTonalIconButtonColors()
+            }
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.GraphicEq,
+                contentDescription = stringResource(R.string.cd_equalizer),
+                modifier = Modifier.size(20.dp)
+            )
+        }
         Text(
             text = timeLabel,
             style = MaterialTheme.typography.labelMedium,
