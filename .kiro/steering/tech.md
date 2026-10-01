@@ -43,8 +43,12 @@
 ```
 
 ## Signing
-Release signing is configured outside the repository through Gradle properties or environment variables:
-`SOUNDVAULT_RELEASE_STORE_FILE`, `SOUNDVAULT_RELEASE_STORE_PASSWORD`, `SOUNDVAULT_RELEASE_KEY_ALIAS`, `SOUNDVAULT_RELEASE_KEY_PASSWORD`.
+`assembleRelease` signs automatically from the local keystore `keystore/soundvault-release.jks` (alias `soundvault`),
+whose password (store = key) is in `keystore/soundvault-release.pass`. All four Gradle properties or environment
+variables `SOUNDVAULT_RELEASE_STORE_FILE`, `SOUNDVAULT_RELEASE_STORE_PASSWORD`, `SOUNDVAULT_RELEASE_KEY_ALIAS`,
+`SOUNDVAULT_RELEASE_KEY_PASSWORD` override it (a partial set is ignored and the APK stays unsigned, never mixed).
+Release cert SHA-256: `e8:73:eb:e6:1e:b8:83:fc:ec:c2:f6:3b:3e:05:24:40:12:5c:b8:37:c6:72:ac:91:8f:f4:91:65:da:3d:ef:92`
+(from 0.1.0; 0.0.3 used a different, leaked key).
 Keystores and password files are git-ignored (`keystore/*.jks`, `*.keystore`, `keystore/*.pass`) and must never be committed.
 
 ## Release Scripts

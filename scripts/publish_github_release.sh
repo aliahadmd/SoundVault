@@ -26,7 +26,7 @@ UNSIGNED_APK_PATH="app/build/outputs/apk/release/app-release-unsigned.apk"
 if [ ! -f "${APK_PATH}" ]; then
   if [ -f "${UNSIGNED_APK_PATH}" ]; then
     echo "Unsigned APK found at ${UNSIGNED_APK_PATH}, but publishing requires a signed release APK." >&2
-    echo "Configure SOUNDVAULT_RELEASE_STORE_FILE, SOUNDVAULT_RELEASE_STORE_PASSWORD, SOUNDVAULT_RELEASE_KEY_ALIAS, and SOUNDVAULT_RELEASE_KEY_PASSWORD, then rebuild with ./gradlew :app:assembleRelease." >&2
+    echo "Put the release keystore in keystore/soundvault-release.jks with its password in keystore/soundvault-release.pass (or set all four SOUNDVAULT_RELEASE_* properties), then rebuild with ./gradlew :app:assembleRelease." >&2
     exit 1
   fi
   echo "APK not found at ${APK_PATH}. Build it first with ./gradlew :app:assembleRelease" >&2

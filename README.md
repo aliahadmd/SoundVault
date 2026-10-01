@@ -54,9 +54,16 @@ Supported formats: mp3, wav, m4a, aac, ogg/oga, opus, flac, plus other files the
 ```
 
 ## Release Signing
-Release signing is configured outside the repository. Set these Gradle properties or environment variables before building a signed release:
+`./gradlew assembleRelease` signs automatically when the local release keystore is present:
+
+- `keystore/soundvault-release.jks` (alias `soundvault`)
+- `keystore/soundvault-release.pass` (the password, used for both store and key)
+
+Both files are git-ignored and must never be committed. To sign with a different keystore, set all four of these Gradle properties or environment variables; they take precedence over the local keystore:
 
 - `SOUNDVAULT_RELEASE_STORE_FILE`
 - `SOUNDVAULT_RELEASE_STORE_PASSWORD`
 - `SOUNDVAULT_RELEASE_KEY_ALIAS`
 - `SOUNDVAULT_RELEASE_KEY_PASSWORD`
+
+Without either, the build produces `app-release-unsigned.apk`.

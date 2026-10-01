@@ -7,24 +7,41 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-val releaseStoreFile = providers.gradleProperty("SOUNDVAULT_RELEASE_STORE_FILE")
-    .orElse(providers.environmentVariable("SOUNDVAULT_RELEASE_STORE_FILE"))
+class ReleaseSigning(val storeFile: File, val storePassword: String, val keyAlias: String, val keyPassword: String)
+
+fun signingProperty(name: String): String? = providers.gradleProperty(name)
+    .orElse(providers.environmentVariable(name))
     .orNull
-val releaseStorePassword = providers.gradleProperty("SOUNDVAULT_RELEASE_STORE_PASSWORD")
-    .orElse(providers.environmentVariable("SOUNDVAULT_RELEASE_STORE_PASSWORD"))
-    .orNull
-val releaseKeyAlias = providers.gradleProperty("SOUNDVAULT_RELEASE_KEY_ALIAS")
-    .orElse(providers.environmentVariable("SOUNDVAULT_RELEASE_KEY_ALIAS"))
-    .orNull
-val releaseKeyPassword = providers.gradleProperty("SOUNDVAULT_RELEASE_KEY_PASSWORD")
-    .orElse(providers.environmentVariable("SOUNDVAULT_RELEASE_KEY_PASSWORD"))
-    .orNull
-val releaseSigningConfigured = listOf(
-    releaseStoreFile,
-    releaseStorePassword,
-    releaseKeyAlias,
-    releaseKeyPassword
-).all { !it.isNullOrBlank() }
+    ?.takeIf { it.isNotBlank() }
+
+// Release signing, in order of precedence:
+// 1. The SOUNDVAULT_RELEASE_* Gradle properties or environment variables (all four, never mixed with 2.).
+// 2. The git-ignored local keystore: keystore/soundvault-release.jks with alias "soundvault" and
+//    keystore/soundvault-release.pass holding the password (the same for store and key).
+// Without either, assembleRelease produces app-release-unsigned.apk.
+val releaseSigning: ReleaseSigning? = run {
+    val storeFile = signingProperty("SOUNDVAULT_RELEASE_STORE_FILE")
+    val storePassword = signingProperty("SOUNDVAULT_RELEASE_STORE_PASSWORD")
+    val keyAlias = signingProperty("SOUNDVAULT_RELEASE_KEY_ALIAS")
+    val keyPassword = signingProperty("SOUNDVAULT_RELEASE_KEY_PASSWORD")
+    if (listOf(storeFile, storePassword, keyAlias, keyPassword).any { it != null }) {
+        if (storeFile != null && storePassword != null && keyAlias != null && keyPassword != null) {
+            ReleaseSigning(file(storeFile), storePassword, keyAlias, keyPassword)
+        } else {
+            null
+        }
+    } else {
+        val keystoreDir = rootProject.layout.projectDirectory.dir("keystore")
+        val localKeystore = keystoreDir.file("soundvault-release.jks").asFile
+        val localPassword = providers.fileContents(keystoreDir.file("soundvault-release.pass"))
+            .asText.orNull?.trim()?.takeIf { it.isNotEmpty() }
+        if (localKeystore.isFile && localPassword != null) {
+            ReleaseSigning(localKeystore, localPassword, "soundvault", localPassword)
+        } else {
+            null
+        }
+    }
+}
 
 android {
     namespace = "me.aliahad.audioplayer"
@@ -33,12 +50,12 @@ android {
     }
 
     signingConfigs {
-        if (releaseSigningConfigured) {
+        if (releaseSigning != null) {
             create("release") {
-                storeFile = file(checkNotNull(releaseStoreFile))
-                storePassword = checkNotNull(releaseStorePassword)
-                keyAlias = checkNotNull(releaseKeyAlias)
-                keyPassword = checkNotNull(releaseKeyPassword)
+                storeFile = releaseSigning.storeFile
+                storePassword = releaseSigning.storePassword
+                keyAlias = releaseSigning.keyAlias
+                keyPassword = releaseSigning.keyPassword
             }
         }
     }
@@ -58,7 +75,7 @@ android {
             // R8 strips unused code (notably the extended Material icon set) and resources: ~49 MB -> a few MB.
             isMinifyEnabled = true
             isShrinkResources = true
-            if (releaseSigningConfigured) {
+            if (releaseSigning != null) {
                 signingConfig = signingConfigs.getByName("release")
             }
             proguardFiles(
