@@ -11,6 +11,10 @@ app/src/main/java/me/aliahad/audioplayer/
 ├── TrackScanner.kt          # AudioTrack + SAF folder scan (DocumentsContract queries, parallel tag reading)
 ├── LibraryRules.kt          # Pure rules: isPlayableAudio, NaturalOrderComparator, formatPlaybackSpeed
 ├── SkipIntervals.kt         # Pure rules: skip step options, sanitizing, target position, labels
+├── EqualizerRules.kt        # Pure rules: EqualizerSettings, 16 presets, sanitizing, RBJ biquad coefficients, pre-gain
+├── EqualizerAudioProcessor.kt # Media3 AudioProcessor: cascaded biquads per channel, limiter, bypass crossfade
+├── EqualizerRenderersFactory.kt # DefaultRenderersFactory that puts the processor into DefaultAudioSink
+├── EqualizerSheet.kt        # Compose bottom sheet: switch, bass boost card, loudness, presets, 10 band sliders
 ├── PlayerPreferences.kt     # DataStore wrapper: folder, playback snapshot, theme
 ├── TimestampBookmark.kt     # Room entity, DAO and database for bookmarks
 ├── TimestampFormatter.kt    # formatTimestamp / parseTimestamp
@@ -32,6 +36,12 @@ app/src/main/java/me/aliahad/audioplayer/
   from `PlayerPreferences.skipIntervals`, so headset keys, Wear OS / Auto and the notification's custom skip buttons
   (custom `SessionCommand`s, re-published on every settings change) all agree. The UI seeks by explicit offsets instead
   of `MediaController.seekBack()`, whose position masking uses a stale cached increment.
+- The equalizer runs in-app, not through `android.media.audiofx`: `PlaybackService` builds ExoPlayer with
+  `EqualizerRenderersFactory`, which puts one `EqualizerAudioProcessor` into `DefaultAudioSink`. The service collects
+  `PlayerPreferences.equalizer` and hands each value to the processor (`setSettings`, volatile swap, applied on the
+  audio thread). It handles PCM16 and float, bypasses when off or flat, crossfades on/off, and caps output with
+  automatic pre-gain plus a peak limiter. The ViewModel only writes preferences, so the sound follows them even
+  without the Activity.
 - Folder scanning uses `DocumentsContract` (one query per directory) and `MediaMetadataRetriever` (4 in parallel) on
   `Dispatchers.IO`. Tracks are ordered naturally by path relative to the chosen folder.
 - Bookmarks are keyed by (document URI, tree URI). The track is captured when the bookmark button is tapped.

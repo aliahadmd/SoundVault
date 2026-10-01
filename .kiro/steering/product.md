@@ -11,6 +11,13 @@ playlist from the audio files inside (including subfolders).
 - Shuffle, repeat (off / all / one), and playback speed presets 0.75× – 2.0×
 - Skip back / skip forward by 5 s, 10 s, 20 s or 1 min, chosen separately per direction in the Settings sheet
   (default 10 s); the notification, lock screen and headset rewind / fast-forward keys use the same steps
+- Equalizer with a bass booster, opened from the bars button in the player controls: one big bass boost control
+  (0–100 %, with Off / Low / Mid / High / Max shortcuts), loudness, 16 presets (Flat, Bass Boost, Subwoofer, Deep Bass,
+  Bass & Treble, Hip-Hop, Dance, Rock, Pop, Jazz, Classical, Acoustic, Vocal, Treble Boost, Loudness, Phone Speaker;
+  "Custom" once a band is edited) and a 10-band graphic EQ (31 Hz – 16 kHz, ±12 dB). It is processed inside the app's
+  own player, so it works on every device and does not depend on Android's per-device audio effects. Output is
+  protected by automatic pre-gain and a limiter, so heavy bass does not clip. Settings persist; moving any control
+  switches it on
 - Timestamp bookmarks with optional notes, per track and folder
 - Light / Night themes (Night by default), toggled in the app bar
 - Track detail bottom sheet (artist, album, duration, file size, location)

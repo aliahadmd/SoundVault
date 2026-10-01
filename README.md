@@ -9,6 +9,7 @@ A polished audio playback app tailored for my personal library. I wanted somethi
 - **Plays nicely with others** – pauses for calls and other media (audio focus) and when headphones are unplugged.
 - **Timestamp bookmarks** – save the current position of a track with an optional note and jump back to it later.
 - **Skip back / skip forward** – jump 5 s, 10 s, 20 s or 1 min (set separately for each direction in Settings, 10 s by default). The same steps apply to the notification, lock-screen and headset rewind / fast-forward buttons.
+- **Equalizer and bass booster** – open it from the bars button in the player controls. One big bass boost control (0–100 %, with Off / Low / Mid / High / Max shortcuts), a loudness boost, 16 presets (Bass Boost, Subwoofer, Deep Bass, Hip-Hop, Rock, Vocal, Phone Speaker and more) and a 10-band equalizer from 31 Hz to 16 kHz (±12 dB). The sound is processed inside the app's own player, so it works the same on every phone, and an automatic pre-gain plus a limiter keep heavy bass from distorting. Settings are remembered, and moving any control switches the equalizer on.
 - **Light and Night themes** – Night by default, toggled from the app bar.
 - **Modern UI** – Material 3 design with compact controls, haptic feedback on the important actions, a track detail sheet, and speed presets from 0.75× to 2.0×.
 - **Dynamic scroll** – the active song always stays in view; the playlist auto-scrolls whenever I move to the next or previous track.
