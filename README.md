@@ -8,6 +8,7 @@ A polished audio playback app tailored for my personal library. I wanted somethi
 - **Background ready** – a Media3 media session service owns the player, so playback, notification and lock-screen controls keep working when the app is closed, and stay available while paused.
 - **Plays nicely with others** – pauses for calls and other media (audio focus) and when headphones are unplugged.
 - **Timestamp bookmarks** – save the current position of a track with an optional note and jump back to it later.
+- **Skip back / skip forward** – jump 5 s, 10 s, 20 s or 1 min (set separately for each direction in Settings, 10 s by default). The same steps apply to the notification, lock-screen and headset rewind / fast-forward buttons.
 - **Light and Night themes** – Night by default, toggled from the app bar.
 - **Modern UI** – Material 3 design with compact controls, haptic feedback on the important actions, a track detail sheet, and speed presets from 0.75× to 2.0×.
 - **Dynamic scroll** – the active song always stays in view; the playlist auto-scrolls whenever I move to the next or previous track.

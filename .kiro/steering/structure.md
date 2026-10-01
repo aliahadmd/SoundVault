@@ -10,6 +10,7 @@ app/src/main/java/me/aliahad/audioplayer/
 │                            #   playback-state persistence, skipping unplayable files; AppScope
 ├── TrackScanner.kt          # AudioTrack + SAF folder scan (DocumentsContract queries, parallel tag reading)
 ├── LibraryRules.kt          # Pure rules: isPlayableAudio, NaturalOrderComparator, formatPlaybackSpeed
+├── SkipIntervals.kt         # Pure rules: skip step options, sanitizing, target position, labels
 ├── PlayerPreferences.kt     # DataStore wrapper: folder, playback snapshot, theme
 ├── TimestampBookmark.kt     # Room entity, DAO and database for bookmarks
 ├── TimestampFormatter.kt    # formatTimestamp / parseTimestamp
@@ -27,6 +28,10 @@ app/src/main/java/me/aliahad/audioplayer/
   if the service already holds that queue (app reopened mid-playback) it adopts it instead of rebuilding.
 - MediaItems carry the document URI as `mediaId` and `requestMetadata.mediaUri`; the session callback restores the
   playback URI in `onAddMediaItems`.
+- The session exposes a `ForwardingPlayer` (`SkipIntervalPlayer`) whose `seekBack`/`seekForward` use the step sizes
+  from `PlayerPreferences.skipIntervals`, so headset keys, Wear OS / Auto and the notification's custom skip buttons
+  (custom `SessionCommand`s, re-published on every settings change) all agree. The UI seeks by explicit offsets instead
+  of `MediaController.seekBack()`, whose position masking uses a stale cached increment.
 - Folder scanning uses `DocumentsContract` (one query per directory) and `MediaMetadataRetriever` (4 in parallel) on
   `Dispatchers.IO`. Tracks are ordered naturally by path relative to the chosen folder.
 - Bookmarks are keyed by (document URI, tree URI). The track is captured when the bookmark button is tapped.
