@@ -1,20 +1,26 @@
 package me.aliahad.audioplayer
 
 import android.app.Application
+import android.content.ComponentName
+import android.content.Intent
 import android.net.Uri
-import android.media.MediaMetadataRetriever
-import androidx.documentfile.provider.DocumentFile
+import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
-import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
-import kotlinx.coroutines.Dispatchers
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import com.google.common.util.concurrent.ListenableFuture
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,21 +29,16 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.delay
-import java.util.Locale
-import kotlin.math.max
 
-data class AudioTrack(
-    val title: String,
-    val uri: Uri,
-    val artist: String? = null,
-    val album: String? = null,
-    val durationMs: Long? = null,
-    val fileSizeBytes: Long? = null
+/** A bookmark being created: everything is captured at tap time, so a track change while the dialog is open cannot re-target it. */
+data class BookmarkDraft(
+    val positionMs: Long,
+    val audioFileUri: String,
+    val folderUri: String,
+    val trackTitle: String
 )
 
 data class PlayerUiState(
@@ -54,531 +55,438 @@ data class PlayerUiState(
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val playbackSpeed: Float = 1f,
     val isNightMode: Boolean = true,
+    val skipIntervals: SkipIntervals = SkipIntervals(),
+    val equalizer: EqualizerSettings = EqualizerSettings(),
     val timestamps: List<TimestampBookmark> = emptyList(),
-    val bookmarkDialogPositionMs: Long? = null
-)
+    val bookmarkDraft: BookmarkDraft? = null
+) {
+    val bookmarkDialogPositionMs: Long? get() = bookmarkDraft?.positionMs
+}
 
+/**
+ * UI-facing state holder. Playback itself lives in [PlaybackService]; this ViewModel drives it
+ * through a [MediaController], so closing or recreating the screen never interrupts or rewinds audio.
+ */
 class AudioPlayerViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val applicationContext = application.applicationContext
-    private val preferences = PlayerPreferences(applicationContext)
-    private val playerManager = AudioPlayerManager.getInstance(applicationContext)
-    private val player: ExoPlayer = playerManager.player
-    private val mediaSession = playerManager.mediaSession
-    private var progressJob: Job? = null
-    private val timestampDao = TimestampDatabase.getInstance(applicationContext).timestampDao()
+    private val app = application
+    private val preferences = PlayerPreferences(application)
+    private val scanner = TrackScanner(application)
+    private val timestampDao = TimestampDatabase.getInstance(application).timestampDao()
 
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
 
-    init {
-        viewModelScope.launch {
-            val savedPreferences = runCatching { preferences.getPreferences() }.getOrNull()
-            if (savedPreferences != null) {
-                _uiState.update { state -> state.copy(isNightMode = savedPreferences.isNightMode) }
-            }
-            val folderUriString = savedPreferences?.folderUri ?: return@launch
-            val folderUri = runCatching { Uri.parse(folderUriString) }.getOrNull()
-                ?: return@launch
-            restorePlaylist(folderUri, savedPreferences)
-        }
-    }
+    /**
+     * The latest equalizer state the user chose that may not be saved yet; null until the first edit.
+     * Declared before `init`, which starts the loop that saves it.
+     */
+    private val pendingEqualizer = MutableStateFlow<EqualizerSettings?>(null)
+
+    private val controllerFuture: ListenableFuture<MediaController>
+    private val connectedController = CompletableDeferred<MediaController>()
+    private var controller: MediaController? = null
+    private var progressJob: Job? = null
+    private var loadJob: Job? = null
 
     private val playerListener = object : Player.Listener {
-        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            val newIndex = currentIndex()
-            _uiState.update { state ->
-                state.copy(currentTrackIndex = newIndex)
-            }
-            updateProgressState()
-            persistSelection(newIndex, resetPosition = true)
+        override fun onEvents(player: Player, events: Player.Events) {
+            syncFromPlayer()
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            _uiState.update { state -> state.copy(isPlaying = isPlaying) }
             if (isPlaying) {
+                // The error message is kept here: after an automatic skip the next track starts playing,
+                // and the user should still see which file was skipped. User actions clear it instead.
                 startProgressUpdates()
-                AudioPlayerService.startService(applicationContext)
             } else {
                 stopProgressUpdates()
-                persistCurrentState()
-                AudioPlayerService.stopService(applicationContext)
             }
         }
 
-        override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_ENDED) {
-                _uiState.update { state -> state.copy(isPlaying = false) }
-                stopProgressUpdates()
-            }
-        }
-
-        override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
-            _uiState.update { state -> state.copy(playbackSpeed = playbackParameters.speed) }
-            persistCurrentState()
-        }
-
-        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-            _uiState.update { state -> state.copy(isShuffleEnabled = shuffleModeEnabled) }
-            persistCurrentState()
-        }
-
-        override fun onRepeatModeChanged(repeatMode: Int) {
-            _uiState.update { state -> state.copy(repeatMode = repeatMode) }
-            persistCurrentState()
+        override fun onPlayerError(error: PlaybackException) {
+            val title = controller?.currentMediaItem?.mediaMetadata?.title ?: ""
+            _uiState.update { it.copy(errorMessage = app.getString(R.string.error_playback_failed, title)) }
         }
     }
 
     init {
-        player.addListener(playerListener)
-    }
+        val token = SessionToken(application, ComponentName(application, PlaybackService::class.java))
+        controllerFuture = MediaController.Builder(application, token).buildAsync()
+        controllerFuture.addListener({
+            val connected = runCatching { controllerFuture.get() }.getOrElse { error ->
+                Log.e(TAG, "Could not connect to PlaybackService", error)
+                _uiState.update { it.copy(isLoading = false, errorMessage = app.getString(R.string.error_player_unavailable)) }
+                return@addListener
+            }
+            controller = connected
+            connected.addListener(playerListener)
+            syncFromPlayer()
+            if (connected.isPlaying) startProgressUpdates()
+            connectedController.complete(connected)
+        }, ContextCompat.getMainExecutor(application))
 
-    init {
-        @OptIn(ExperimentalCoroutinesApi::class)
+        viewModelScope.launch { restoreSession() }
+        observeBookmarksForCurrentTrack()
         viewModelScope.launch {
-            _uiState
-                .map { state ->
-                    val track = state.tracks.getOrNull(state.currentTrackIndex)
-                    val audioFileUri = track?.uri?.toString()
-                    val folderUri = state.folderUri?.toString()
-                    if (audioFileUri != null && folderUri != null) audioFileUri to folderUri else null
-                }
-                .distinctUntilChanged()
-                .flatMapLatest { pair ->
-                    if (pair != null) {
-                        timestampDao.getBookmarksForTrack(pair.first, pair.second)
-                    } else {
-                        flowOf(emptyList())
-                    }
-                }
-                .collectLatest { bookmarks ->
-                    _uiState.update { state -> state.copy(timestamps = bookmarks) }
-                }
+            preferences.skipIntervals.collect { intervals -> _uiState.update { it.copy(skipIntervals = intervals) } }
         }
+        observeEqualizer()
     }
 
     fun toggleTheme() {
         val newValue = !_uiState.value.isNightMode
-        _uiState.update { state -> state.copy(isNightMode = newValue) }
+        _uiState.update { it.copy(isNightMode = newValue) }
         viewModelScope.launch {
             runCatching { preferences.saveThemeMode(newValue) }
-                .onFailure { android.util.Log.w("AudioPlayerViewModel", "Failed to persist theme preference", it) }
+                .onFailure { Log.w(TAG, "Failed to persist theme preference", it) }
         }
     }
 
     fun onFolderSelected(folderUri: Uri) {
-        viewModelScope.launch {
-            _uiState.update { state ->
-                state.copy(isLoading = true, errorMessage = null)
-            }
-
-            val tracks = loadTracks(folderUri)
-
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            val tracks = scanner.scan(folderUri)
             if (tracks.isEmpty()) {
-                clearPlaylist()
-                _uiState.update { state ->
-                    state.copy(
-                        folderUri = folderUri,
-                        tracks = emptyList(),
-                        currentTrackIndex = -1,
-                        isPlaying = false,
-                        isLoading = false,
-                        errorMessage = "No audio files found in selected folder."
-                    )
+                // Keep whatever was playing; just report the empty pick and drop its grant.
+                if (folderUri != _uiState.value.folderUri) releaseFolderGrant(folderUri)
+                _uiState.update {
+                    it.copy(isLoading = false, errorMessage = app.getString(R.string.error_no_audio_in_folder))
                 }
-                preferences.clearPlaybackState()
-                AudioPlayerService.stopService(applicationContext)
                 return@launch
-            } else {
-                val startIndex = 0
-                setPlaylist(folderUri, tracks, startIndex = startIndex)
-                persistSelection(startIndex, resetPosition = true)
             }
+            val player = connectedController.await()
+            preferences.saveFolder(folderUri)
+            releaseFolderGrantsExcept(folderUri)
+            _uiState.update { it.copy(folderUri = folderUri, tracks = tracks, isLoading = false) }
+            loadQueue(player, tracks, startIndex = 0, startPositionMs = 0L, playWhenReady = false)
         }
     }
 
     fun togglePlayPause() {
-        val currentTracks = _uiState.value.tracks
-        if (currentTracks.isEmpty()) return
-
-        if (_uiState.value.isPlaying) {
-            player.pause()
-        } else {
-            if (currentIndex() == -1) {
-                selectTrack(0, playImmediately = true)
-            } else {
-                startPlayback()
-            }
-        }
+        val player = controller ?: return
+        if (player.isPlaying) player.pause() else startPlayback(player)
     }
 
     fun playNext() {
+        val player = controller ?: return
         if (player.hasNextMediaItem()) {
-            player.seekToNext()
-            startPlayback()
+            player.seekToNextMediaItem()
+            startPlayback(player)
         }
     }
 
     fun playPrevious() {
-        if (player.hasPreviousMediaItem()) {
-            player.seekToPrevious()
-            startPlayback()
-        } else {
-            // If we're at the first track, restart it to mimic basic player behavior.
-            if (player.mediaItemCount > 0) {
-                player.seekTo(0, 0L)
-                startPlayback()
-            }
-        }
+        val player = controller ?: return
+        if (player.mediaItemCount == 0) return
+        // Restarts the current track when past the first few seconds, otherwise goes back one track.
+        player.seekToPrevious()
+        startPlayback(player)
     }
 
     fun stopPlayback() {
-        val index = currentIndex()
+        val player = controller ?: return
         player.pause()
-        if (player.mediaItemCount > 0 && index >= 0) {
-            player.seekTo(index, 0L)
-        }
-        _uiState.update { state -> state.copy(isPlaying = false) }
-        stopProgressUpdates()
-        persistSelection(index, resetPosition = true)
-        AudioPlayerService.stopService(applicationContext)
+        if (player.mediaItemCount > 0) player.seekTo(player.currentMediaItemIndex, 0L)
     }
 
-    fun selectTrack(index: Int, playImmediately: Boolean = true) {
-        if (index !in _uiState.value.tracks.indices) return
-
+    fun selectTrack(index: Int) {
+        val player = controller ?: return
+        if (index !in 0 until player.mediaItemCount) return
         player.seekTo(index, 0L)
-        _uiState.update { state -> state.copy(currentTrackIndex = index) }
-        updateProgressState()
-        persistSelection(index, resetPosition = true)
-        if (playImmediately) {
-            startPlayback()
-        }
+        startPlayback(player)
     }
 
     fun toggleShuffle() {
-        val enabled = !player.shuffleModeEnabled
-        player.shuffleModeEnabled = enabled
-        _uiState.update { state -> state.copy(isShuffleEnabled = enabled) }
-        persistCurrentState()
+        controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled }
     }
 
     fun cycleRepeatMode() {
-        val nextMode = when (player.repeatMode) {
+        val player = controller ?: return
+        player.repeatMode = when (player.repeatMode) {
             Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
             Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
             else -> Player.REPEAT_MODE_OFF
         }
-        player.repeatMode = nextMode
-        _uiState.update { state -> state.copy(repeatMode = nextMode) }
-        persistCurrentState()
     }
 
     fun cyclePlaybackSpeed() {
+        val player = controller ?: return
         val currentSpeed = player.playbackParameters.speed
-        val nextSpeed = SPEED_PRESETS.firstOrNull { it > currentSpeed + SPEED_EPSILON }
-            ?: SPEED_PRESETS.first()
+        val nextSpeed = SPEED_PRESETS.firstOrNull { it > currentSpeed + SPEED_EPSILON } ?: SPEED_PRESETS.first()
         player.setPlaybackSpeed(nextSpeed)
-        _uiState.update { state -> state.copy(playbackSpeed = nextSpeed) }
-        persistCurrentState()
     }
 
     fun seekTo(positionMs: Long) {
+        val player = controller ?: return
         val duration = player.duration.takeIf { it != C.TIME_UNSET && it >= 0 } ?: Long.MAX_VALUE
-        val safePosition = positionMs.coerceIn(0L, duration)
-        player.seekTo(safePosition)
-        updateProgressState()
-        persistCurrentState()
+        player.seekTo(positionMs.coerceIn(0L, duration))
+        updateProgress()
     }
 
-    fun onBookmarkTap() {
-        val positionMs = player.currentPosition
-        _uiState.update { it.copy(bookmarkDialogPositionMs = positionMs) }
-    }
+    fun skipBack() = skipBy(-_uiState.value.skipIntervals.backMs)
 
-    fun saveBookmark(positionMs: Long, note: String?) {
-        val state = _uiState.value
-        val track = state.tracks.getOrNull(state.currentTrackIndex) ?: return
-        val folderUri = state.folderUri?.toString() ?: return
+    fun skipForward() = skipBy(_uiState.value.skipIntervals.forwardMs)
+
+    fun setSkipBackInterval(intervalMs: Long) {
         viewModelScope.launch {
-            timestampDao.insert(
-                TimestampBookmark(
-                    audioFileUri = track.uri.toString(),
-                    folderUri = folderUri,
-                    positionMs = positionMs,
-                    note = note?.takeIf { it.isNotBlank() }
-                )
-            )
-            _uiState.update { it.copy(bookmarkDialogPositionMs = null) }
+            runCatching { preferences.saveSkipBackInterval(intervalMs) }
+                .onFailure { Log.w(TAG, "Failed to persist skip back interval", it) }
         }
     }
 
-    fun dismissBookmarkDialog() {
-        _uiState.update { it.copy(bookmarkDialogPositionMs = null) }
-    }
-
-    fun deleteBookmark(id: Long) {
+    fun setSkipForwardInterval(intervalMs: Long) {
         viewModelScope.launch {
-            timestampDao.deleteById(id)
+            runCatching { preferences.saveSkipForwardInterval(intervalMs) }
+                .onFailure { Log.w(TAG, "Failed to persist skip forward interval", it) }
         }
     }
 
-    fun seekToTimestamp(positionMs: Long) {
-        player.seekTo(positionMs)
-        if (!player.isPlaying) {
-            startPlayback()
-        }
-        updateProgressState()
-    }
-
-    private suspend fun restorePlaylist(folderUri: Uri, preferencesData: PlayerPreferencesData) {
-        _uiState.update { state ->
-            state.copy(isLoading = true, errorMessage = null)
-        }
-
-        val tracks = loadTracks(folderUri)
-
-        if (tracks.isEmpty()) {
-            clearPlaylist()
-            preferences.clearPlaybackState()
-            _uiState.update { state ->
-                state.copy(
-                    folderUri = folderUri,
-                    tracks = emptyList(),
-                    currentTrackIndex = -1,
-                    isPlaying = false,
-                    isLoading = false,
-                    errorMessage = "We couldn't find audio in the saved folder. Please choose another folder."
-                )
+    /**
+     * Sliders update [PlayerUiState.equalizer] at once and are saved in the background. The service hears
+     * the saved value, so it always plays what was last stored. A StateFlow drops intermediate values, so
+     * a fast drag never queues up writes, and saved values older than the latest edit are not echoed back
+     * into the UI (which would make a slider jump back while it is being dragged).
+     */
+    private fun observeEqualizer() {
+        viewModelScope.launch {
+            preferences.equalizer.collect { saved ->
+                val pending = pendingEqualizer.value
+                if (pending == null || pending == saved) _uiState.update { it.copy(equalizer = saved) }
             }
-            return
         }
-
-        val targetIndex = preferencesData.currentTrackUri
-            ?.let { runCatching { Uri.parse(it) }.getOrNull() }
-            ?.let { storedUri -> tracks.indexOfFirst { it.uri == storedUri } }
-            ?.takeIf { it >= 0 }
-            ?: 0
-
-        setPlaylist(folderUri, tracks, startIndex = targetIndex)
-        player.shuffleModeEnabled = preferencesData.shuffleEnabled
-        player.repeatMode = preferencesData.repeatMode
-        if (preferencesData.playbackSpeed > 0f) {
-            player.setPlaybackSpeed(preferencesData.playbackSpeed)
-        }
-        val savedPosition = preferencesData.positionMs.takeIf { it > 0L }
-        if (savedPosition != null) {
-            player.seekTo(targetIndex, savedPosition)
-        }
-        updateProgressState()
-        _uiState.update { state ->
-            state.copy(
-                isShuffleEnabled = player.shuffleModeEnabled,
-                repeatMode = player.repeatMode,
-                playbackSpeed = player.playbackParameters.speed
-            )
-        }
-        persistCurrentState()
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        player.removeListener(playerListener)
-        stopProgressUpdates()
-        persistCurrentState()
-    }
-
-    private suspend fun loadTracks(folderUri: Uri): List<AudioTrack> = withContext(Dispatchers.IO) {
-        try {
-            val documentFile = DocumentFile.fromTreeUri(applicationContext, folderUri)
-            if (documentFile == null || !documentFile.isDirectory) {
-                return@withContext emptyList()
-            }
-
-            val collection = mutableListOf<AudioTrack>()
-            collectAudioFiles(documentFile, collection)
-            collection.sortBy { it.title.lowercase(Locale.ROOT) }
-            collection
-        } catch (_: SecurityException) {
-            emptyList()
-        }
-    }
-
-    private fun collectAudioFiles(folder: DocumentFile, collection: MutableList<AudioTrack>) {
-        val children = try {
-            folder.listFiles()
-        } catch (_: SecurityException) {
-            return
-        }
-        children.forEach { file ->
-            when {
-                file.isDirectory -> collectAudioFiles(file, collection)
-                file.isFile && isAudioFile(file) -> {
-                    collection += buildAudioTrack(file)
+        viewModelScope.launch {
+            pendingEqualizer.collect { settings ->
+                if (settings != null) {
+                    runCatching { preferences.saveEqualizer(settings) }
+                        .onFailure { Log.w(TAG, "Failed to persist equalizer settings", it) }
                 }
             }
         }
     }
 
-    private fun buildAudioTrack(file: DocumentFile): AudioTrack {
-        val defaultTitle = file.name ?: "Unknown"
-        val metadataRetriever = MediaMetadataRetriever()
-        var artist: String? = null
-        var album: String? = null
-        var durationMs: Long? = null
-        var title: String? = null
+    private fun updateEqualizer(transform: (EqualizerSettings) -> EqualizerSettings) {
+        val next = sanitizeEqualizerSettings(transform(_uiState.value.equalizer))
+        _uiState.update { it.copy(equalizer = next) }
+        pendingEqualizer.value = next
+    }
 
-        runCatching {
-            metadataRetriever.setDataSource(applicationContext, file.uri)
-            title = metadataRetriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
-            artist = metadataRetriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
-            album = metadataRetriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
-            durationMs = metadataRetriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                ?.toLongOrNull()
-        }.onFailure {
-            // Ignore metadata failures; fall back to file information.
-        }.also {
-            runCatching { metadataRetriever.release() }
+    fun setEqualizerEnabled(enabled: Boolean) = updateEqualizer { it.copy(enabled = enabled) }
+
+    // Touching any sound control switches the equalizer on, so a change is always audible.
+
+    fun selectEqualizerPreset(preset: EqPreset) = updateEqualizer { it.withPreset(preset).copy(enabled = true) }
+
+    fun setEqualizerBand(band: Int, gainDb: Double) =
+        updateEqualizer { it.withBandGain(band, gainDb).copy(enabled = true) }
+
+    fun setBassBoost(percent: Int) = updateEqualizer { it.copy(bassBoostPercent = percent, enabled = true) }
+
+    fun setLoudness(percent: Int) = updateEqualizer { it.copy(loudnessPercent = percent, enabled = true) }
+
+    /** Flat bands and no bass boost or loudness; the on/off switch is left as it is. */
+    fun resetEqualizer() = updateEqualizer { EqualizerSettings(enabled = it.enabled) }
+
+    /**
+     * Seeks by an explicit offset rather than calling MediaController.seekBack(): the controller would
+     * mask the position with the increment it cached at connect time, which is stale after a Settings change.
+     * The service applies the same rule for notification, lock-screen and headset skips.
+     */
+    private fun skipBy(offsetMs: Long) {
+        val player = controller ?: return
+        if (player.mediaItemCount == 0) return
+        player.seekTo(skipTargetPosition(player.currentPosition, player.duration.takeIf { it != C.TIME_UNSET }, offsetMs))
+        updateProgress()
+    }
+
+    fun onBookmarkTap() {
+        val state = _uiState.value
+        val track = state.tracks.getOrNull(state.currentTrackIndex) ?: return
+        val folderUri = state.folderUri ?: return
+        val positionMs = controller?.currentPosition?.coerceAtLeast(0L) ?: state.currentPosition
+        _uiState.update {
+            it.copy(
+                bookmarkDraft = BookmarkDraft(
+                    positionMs = positionMs,
+                    audioFileUri = track.uri.toString(),
+                    folderUri = folderUri.toString(),
+                    trackTitle = track.title
+                )
+            )
         }
-
-        val cleanTitle = title?.takeIf { it.isNotBlank() } ?: defaultTitle
-        val cleanArtist = artist?.takeIf { it.isNotBlank() }
-        val cleanAlbum = album?.takeIf { it.isNotBlank() }
-        val fileSize = file.length().takeIf { it >= 0 }
-
-        return AudioTrack(
-            title = cleanTitle,
-            uri = file.uri,
-            artist = cleanArtist,
-            album = cleanAlbum,
-            durationMs = durationMs,
-            fileSizeBytes = fileSize
-        )
     }
 
-    private fun isAudioFile(file: DocumentFile): Boolean {
-        val mimeType = file.type
-        if (mimeType != null && mimeType.startsWith("audio")) return true
-
-        val extension = file.name
-            ?.substringAfterLast('.', missingDelimiterValue = "")
-            ?.lowercase(Locale.ROOT)
-        return extension in SUPPORTED_AUDIO_EXTENSIONS
+    fun saveBookmark(note: String?) {
+        val draft = _uiState.value.bookmarkDraft ?: return
+        _uiState.update { it.copy(bookmarkDraft = null) }
+        viewModelScope.launch {
+            timestampDao.insert(
+                TimestampBookmark(
+                    audioFileUri = draft.audioFileUri,
+                    folderUri = draft.folderUri,
+                    positionMs = draft.positionMs,
+                    note = note?.trim()?.takeIf { it.isNotEmpty() }
+                )
+            )
+        }
     }
 
-    @androidx.annotation.OptIn(UnstableApi::class)
-    private fun setPlaylist(folderUri: Uri, tracks: List<AudioTrack>, startIndex: Int = 0) {
-        player.stop()
-        player.clearMediaItems()
+    fun dismissBookmarkDialog() {
+        _uiState.update { it.copy(bookmarkDraft = null) }
+    }
+
+    fun deleteBookmark(id: Long) {
+        viewModelScope.launch { timestampDao.deleteById(id) }
+    }
+
+    fun seekToTimestamp(positionMs: Long) {
+        val player = controller ?: return
+        player.seekTo(positionMs.coerceAtLeast(0L))
+        if (!player.isPlaying) startPlayback(player)
+        updateProgress()
+    }
+
+    override fun onCleared() {
+        stopProgressUpdates()
+        controller?.removeListener(playerListener)
+        controller = null
+        MediaController.releaseFuture(controllerFuture)
+        super.onCleared()
+    }
+
+    /**
+     * Restores the saved folder. When the service is still holding that folder's queue (the app was
+     * swiped away and reopened mid-playback) the live queue is adopted as-is instead of being rebuilt.
+     */
+    private suspend fun restoreSession() {
+        val saved = runCatching { preferences.getPreferences() }.getOrNull() ?: PlayerPreferencesData()
+        _uiState.update { it.copy(isNightMode = saved.isNightMode) }
+        val folderUri = saved.folderUri?.let { runCatching { Uri.parse(it) }.getOrNull() } ?: return
+
+        _uiState.update { it.copy(folderUri = folderUri, isLoading = true, errorMessage = null) }
+        val tracks = scanner.scan(folderUri)
+        val player = connectedController.await()
 
         if (tracks.isEmpty()) {
-            _uiState.update { state ->
-                state.copy(
-                    folderUri = folderUri,
-                    tracks = emptyList(),
-                    currentTrackIndex = -1,
-                    isPlaying = false,
-                    isLoading = false,
-                    errorMessage = null,
-                    currentPosition = 0L,
-                    bufferedPosition = 0L,
-                    duration = 0L
-                )
+            _uiState.update {
+                it.copy(isLoading = false, errorMessage = app.getString(R.string.error_saved_folder_empty))
             }
             return
         }
+        _uiState.update { it.copy(tracks = tracks, isLoading = false) }
 
-        val mediaItems = tracks.map { track ->
+        when {
+            queueMatches(player, tracks) -> syncFromPlayer()
+            player.mediaItemCount > 0 -> {
+                // Folder contents changed while the service kept playing: rebuild, but stay on the same track.
+                val currentId = player.currentMediaItem?.mediaId
+                val index = tracks.indexOfFirst { it.uri.toString() == currentId }
+                if (index >= 0) {
+                    loadQueue(player, tracks, index, player.currentPosition, player.playWhenReady)
+                } else {
+                    loadQueue(player, tracks, 0, 0L, playWhenReady = false)
+                }
+            }
+            else -> {
+                val index = saved.currentTrackUri?.let { uri -> tracks.indexOfFirst { it.uri.toString() == uri } } ?: -1
+                player.shuffleModeEnabled = saved.shuffleEnabled
+                player.repeatMode = saved.repeatMode
+                if (saved.playbackSpeed > 0f) player.setPlaybackSpeed(saved.playbackSpeed)
+                if (index >= 0) {
+                    loadQueue(player, tracks, index, saved.positionMs, playWhenReady = false)
+                } else {
+                    loadQueue(player, tracks, 0, 0L, playWhenReady = false)
+                }
+            }
+        }
+    }
+
+    private fun queueMatches(player: Player, tracks: List<AudioTrack>): Boolean {
+        if (player.mediaItemCount != tracks.size) return false
+        return tracks.indices.all { player.getMediaItemAt(it).mediaId == tracks[it].uri.toString() }
+    }
+
+    @androidx.annotation.OptIn(UnstableApi::class)
+    private fun loadQueue(
+        player: Player,
+        tracks: List<AudioTrack>,
+        startIndex: Int,
+        startPositionMs: Long,
+        playWhenReady: Boolean
+    ) {
+        val items = tracks.map { track ->
             MediaItem.Builder()
+                .setMediaId(track.uri.toString())
                 .setUri(track.uri)
+                .setRequestMetadata(MediaItem.RequestMetadata.Builder().setMediaUri(track.uri).build())
                 .setMediaMetadata(
                     MediaMetadata.Builder()
                         .setTitle(track.title)
-                        .apply {
-                            track.artist?.let { setArtist(it) }
-                            track.album?.let { setAlbumTitle(it) }
-                            track.durationMs?.let { setDurationMs(it) }
-                        }
+                        .setArtist(track.artist)
+                        .setAlbumTitle(track.album)
+                        .apply { track.durationMs?.let { setDurationMs(it) } }
                         .build()
                 )
                 .build()
         }
-
-        val effectiveIndex = startIndex.coerceIn(0, tracks.lastIndex)
-        player.setMediaItems(mediaItems, effectiveIndex, 0L)
+        player.setMediaItems(items, startIndex.coerceIn(0, items.lastIndex), startPositionMs.coerceAtLeast(0L))
+        player.playWhenReady = playWhenReady
         player.prepare()
+        syncFromPlayer()
+    }
 
-        _uiState.update { state ->
-            state.copy(
-                folderUri = folderUri,
-                tracks = tracks,
-                currentTrackIndex = effectiveIndex,
-                isPlaying = false,
-                isLoading = false,
-                errorMessage = null,
-                currentPosition = 0L,
-                bufferedPosition = 0L,
-                duration = player.duration.takeIf { it != C.TIME_UNSET && it >= 0 } ?: 0L,
+    /** Starts playback from whatever state the player is in, including after an error or the end of the queue. */
+    private fun startPlayback(player: Player) {
+        if (player.mediaItemCount == 0) return
+        _uiState.update { it.copy(errorMessage = null) }
+        when (player.playbackState) {
+            Player.STATE_IDLE -> player.prepare()
+            Player.STATE_ENDED -> {
+                val first = player.currentTimeline.getFirstWindowIndex(player.shuffleModeEnabled)
+                player.seekTo(if (first == C.INDEX_UNSET) 0 else first, 0L)
+            }
+        }
+        player.play()
+    }
+
+    private fun syncFromPlayer() {
+        val player = controller ?: return
+        val tracks = _uiState.value.tracks
+        val currentId = player.currentMediaItem?.mediaId
+        val queueIndex = player.currentMediaItemIndex
+        val trackIndex = when {
+            currentId == null -> -1
+            tracks.getOrNull(queueIndex)?.uri?.toString() == currentId -> queueIndex
+            else -> tracks.indexOfFirst { it.uri.toString() == currentId }
+        }
+        _uiState.update {
+            it.copy(
+                currentTrackIndex = trackIndex,
+                isPlaying = player.isPlaying,
                 isShuffleEnabled = player.shuffleModeEnabled,
                 repeatMode = player.repeatMode,
                 playbackSpeed = player.playbackParameters.speed
             )
         }
+        updateProgress()
     }
 
-    private fun clearPlaylist() {
-        player.stop()
-        player.clearMediaItems()
-        AudioPlayerService.stopService(applicationContext)
-    }
-
-    private fun startPlayback() {
-        if (player.playbackState == Player.STATE_IDLE) {
-            player.prepare()
-        }
-        player.play()
-        _uiState.update { state -> state.copy(isPlaying = true, currentTrackIndex = currentIndex()) }
-        startProgressUpdates()
-        AudioPlayerService.startService(applicationContext)
-    }
-
-    private fun currentIndex(): Int =
-        if (player.mediaItemCount == 0) -1 else player.currentMediaItemIndex
-
-    private fun persistSelection(index: Int, resetPosition: Boolean = false) {
-        val folderUri = _uiState.value.folderUri ?: return
-        val track = _uiState.value.tracks.getOrNull(index)
-        val positionOverride = if (resetPosition) 0L else null
-        persistCurrentState(positionOverride = positionOverride, trackOverride = track)
-    }
-
-    private fun persistCurrentState(
-        positionOverride: Long? = null,
-        trackOverride: AudioTrack? = null
-    ) {
-        val folderUri = _uiState.value.folderUri
-        val track = trackOverride ?: _uiState.value.tracks.getOrNull(currentIndex())
-        val position = positionOverride ?: player.currentPosition
-        val shuffleEnabled = player.shuffleModeEnabled
-        val repeatMode = player.repeatMode
-        val playbackSpeed = player.playbackParameters.speed
-        viewModelScope.launch {
-            preferences.saveState(
-                folderUri = folderUri,
-                trackUri = track?.uri,
-                positionMs = position,
-                shuffleEnabled = shuffleEnabled,
-                repeatMode = repeatMode,
-                playbackSpeed = playbackSpeed
-            )
+    private fun updateProgress() {
+        val player = controller ?: return
+        val duration = player.duration.takeIf { it != C.TIME_UNSET && it >= 0 } ?: 0L
+        val position = player.currentPosition.coerceAtLeast(0L)
+        val buffered = player.bufferedPosition.coerceAtLeast(0L)
+        _uiState.update {
+            it.copy(currentPosition = position, bufferedPosition = buffered, duration = maxOf(duration, position))
         }
     }
 
     private fun startProgressUpdates() {
         progressJob?.cancel()
         progressJob = viewModelScope.launch {
-            while (true) {
-                updateProgressState()
+            while (isActive) {
+                updateProgress()
                 delay(PROGRESS_UPDATE_INTERVAL_MS)
             }
         }
@@ -587,33 +495,43 @@ class AudioPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private fun stopProgressUpdates() {
         progressJob?.cancel()
         progressJob = null
-        updateProgressState()
+        updateProgress()
     }
 
-    private fun updateProgressState() {
-        val duration = player.duration.takeIf { it != C.TIME_UNSET && it >= 0 } ?: 0L
-        val position = player.currentPosition.coerceAtLeast(0L)
-        val buffered = player.bufferedPosition.coerceAtLeast(0L)
-        _uiState.update { state ->
-            state.copy(
-                currentPosition = position,
-                bufferedPosition = buffered,
-                duration = max(duration, position)
-            )
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun observeBookmarksForCurrentTrack() {
+        viewModelScope.launch {
+            _uiState
+                .map { state ->
+                    val track = state.tracks.getOrNull(state.currentTrackIndex)
+                    val folder = state.folderUri
+                    if (track != null && folder != null) track.uri.toString() to folder.toString() else null
+                }
+                .distinctUntilChanged()
+                .flatMapLatest { key ->
+                    if (key != null) timestampDao.getBookmarksForTrack(key.first, key.second) else flowOf(emptyList())
+                }
+                .collectLatest { bookmarks -> _uiState.update { it.copy(timestamps = bookmarks) } }
         }
     }
 
-    companion object {
-        private const val PROGRESS_UPDATE_INTERVAL_MS = 500L
-        private val SPEED_PRESETS = listOf(0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f)
-        private const val SPEED_EPSILON = 0.05f
-        private val SUPPORTED_AUDIO_EXTENSIONS = setOf(
-            "mp3",
-            "wav",
-            "m4a",
-            "aac",
-            "ogg",
-            "flac"
-        )
+    /** Android caps persisted grants per app; drop the ones for folders the user has moved away from. */
+    private fun releaseFolderGrantsExcept(keep: Uri) {
+        app.contentResolver.persistedUriPermissions
+            .filter { it.uri != keep }
+            .forEach { releaseFolderGrant(it.uri) }
+    }
+
+    private fun releaseFolderGrant(uri: Uri) {
+        runCatching {
+            app.contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+
+    private companion object {
+        const val TAG = "AudioPlayerViewModel"
+        const val PROGRESS_UPDATE_INTERVAL_MS = 500L
+        val SPEED_PRESETS = listOf(0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f)
+        const val SPEED_EPSILON = 0.05f
     }
 }

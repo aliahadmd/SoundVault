@@ -15,3 +15,7 @@
 local.properties
 keystore/*.jks
 keystore/*.keystore
+keystore/*.pass
+keystore/*.properties
+*.jks
+*.keystore

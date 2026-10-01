@@ -7,13 +7,17 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +26,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
@@ -29,11 +34,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.rounded.BookmarkAdd
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.LibraryMusic
@@ -42,18 +53,13 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Speed
-import androidx.compose.material.icons.rounded.Shuffle
-import androidx.compose.material.icons.rounded.BookmarkAdd
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Stop
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ElevatedCard
@@ -65,16 +71,18 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.foundation.clickable
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SheetState
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -90,18 +98,27 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import me.aliahad.audioplayer.ui.theme.AudioplayerTheme
 import java.util.Locale
+import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
 
@@ -116,23 +133,13 @@ class MainActivity : ComponentActivity() {
 
             val activity = this@MainActivity
             LaunchedEffect(uiState.isNightMode) {
-                if (uiState.isNightMode) {
-                    activity.enableEdgeToEdge(
-                        statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
-                        navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-                    )
+                val transparent = android.graphics.Color.TRANSPARENT
+                val barStyle = if (uiState.isNightMode) {
+                    SystemBarStyle.dark(transparent)
                 } else {
-                    activity.enableEdgeToEdge(
-                        statusBarStyle = SystemBarStyle.light(
-                            android.graphics.Color.TRANSPARENT,
-                            android.graphics.Color.TRANSPARENT
-                        ),
-                        navigationBarStyle = SystemBarStyle.light(
-                            android.graphics.Color.TRANSPARENT,
-                            android.graphics.Color.TRANSPARENT
-                        )
-                    )
+                    SystemBarStyle.light(transparent, transparent)
                 }
+                activity.enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
             }
 
             AudioplayerTheme(isNightMode = uiState.isNightMode) {
@@ -141,9 +148,8 @@ class MainActivity : ComponentActivity() {
                     contract = ActivityResultContracts.OpenDocumentTree()
                 ) { uri ->
                     if (uri != null) {
-                        val contentResolver = context.contentResolver
                         try {
-                            contentResolver.takePersistableUriPermission(
+                            context.contentResolver.takePersistableUriPermission(
                                 uri,
                                 Intent.FLAG_GRANT_READ_URI_PERMISSION
                             )
@@ -157,31 +163,41 @@ class MainActivity : ComponentActivity() {
                 AudioPlayerScreen(
                     uiState = uiState,
                     onChooseFolder = { folderPicker.launch(null) },
-                    onPlayPause = { viewModel.togglePlayPause() },
-                    onNext = { viewModel.playNext() },
-                    onPrevious = { viewModel.playPrevious() },
-                    onStop = { viewModel.stopPlayback() },
-                    onSelectTrack = { index -> viewModel.selectTrack(index) },
-                    onSeekTo = { position -> viewModel.seekTo(position) },
-                    onToggleShuffle = { viewModel.toggleShuffle() },
-                    onCycleRepeatMode = { viewModel.cycleRepeatMode() },
-                    onCyclePlaybackSpeed = { viewModel.cyclePlaybackSpeed() },
-                    onToggleTheme = { viewModel.toggleTheme() },
-                    onBookmarkTap = { viewModel.onBookmarkTap() },
-                    onSaveBookmark = { positionMs, note -> viewModel.saveBookmark(positionMs, note) },
-                    onDismissBookmarkDialog = { viewModel.dismissBookmarkDialog() },
-                    onSeekToTimestamp = { positionMs -> viewModel.seekToTimestamp(positionMs) },
-                    onDeleteTimestamp = { id -> viewModel.deleteBookmark(id) }
+                    onPlayPause = viewModel::togglePlayPause,
+                    onNext = viewModel::playNext,
+                    onPrevious = viewModel::playPrevious,
+                    onStop = viewModel::stopPlayback,
+                    onSelectTrack = viewModel::selectTrack,
+                    onSeekTo = viewModel::seekTo,
+                    onSkipBack = viewModel::skipBack,
+                    onSkipForward = viewModel::skipForward,
+                    onToggleShuffle = viewModel::toggleShuffle,
+                    onCycleRepeatMode = viewModel::cycleRepeatMode,
+                    onCyclePlaybackSpeed = viewModel::cyclePlaybackSpeed,
+                    onToggleTheme = viewModel::toggleTheme,
+                    onSetSkipBackInterval = viewModel::setSkipBackInterval,
+                    onSetSkipForwardInterval = viewModel::setSkipForwardInterval,
+                    onSetEqualizerEnabled = viewModel::setEqualizerEnabled,
+                    onSelectEqualizerPreset = viewModel::selectEqualizerPreset,
+                    onSetEqualizerBand = viewModel::setEqualizerBand,
+                    onSetBassBoost = viewModel::setBassBoost,
+                    onSetLoudness = viewModel::setLoudness,
+                    onResetEqualizer = viewModel::resetEqualizer,
+                    onBookmarkTap = viewModel::onBookmarkTap,
+                    onSaveBookmark = viewModel::saveBookmark,
+                    onDismissBookmarkDialog = viewModel::dismissBookmarkDialog,
+                    onSeekToTimestamp = viewModel::seekToTimestamp,
+                    onDeleteTimestamp = viewModel::deleteBookmark
                 )
             }
         }
     }
 
     private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_PERMISSION_REQUEST_CODE)
-            }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_PERMISSION_REQUEST_CODE)
         }
     }
 
@@ -189,6 +205,10 @@ class MainActivity : ComponentActivity() {
         private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 100
     }
 }
+
+/** Icon for the theme toggle: offers the mode you would switch to (sun while in Night mode). */
+internal fun themeToggleIcon(isNightMode: Boolean): ImageVector =
+    if (isNightMode) Icons.Filled.LightMode else Icons.Filled.DarkMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -201,19 +221,31 @@ fun AudioPlayerScreen(
     onStop: () -> Unit,
     onSelectTrack: (Int) -> Unit,
     onSeekTo: (Long) -> Unit,
+    onSkipBack: () -> Unit,
+    onSkipForward: () -> Unit,
     onToggleShuffle: () -> Unit,
     onCycleRepeatMode: () -> Unit,
     onCyclePlaybackSpeed: () -> Unit,
     onToggleTheme: () -> Unit,
+    onSetSkipBackInterval: (Long) -> Unit,
+    onSetSkipForwardInterval: (Long) -> Unit,
     onBookmarkTap: () -> Unit,
-    onSaveBookmark: (Long, String?) -> Unit,
+    onSaveBookmark: (String?) -> Unit,
     onDismissBookmarkDialog: () -> Unit,
     onSeekToTimestamp: (Long) -> Unit,
     onDeleteTimestamp: (Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onSetEqualizerEnabled: (Boolean) -> Unit = {},
+    onSelectEqualizerPreset: (EqPreset) -> Unit = {},
+    onSetEqualizerBand: (Int, Double) -> Unit = { _, _ -> },
+    onSetBassBoost: (Int) -> Unit = {},
+    onSetLoudness: (Int) -> Unit = {},
+    onResetEqualizer: () -> Unit = {}
 ) {
     val currentTrack = uiState.tracks.getOrNull(uiState.currentTrackIndex)
     val hasTracks = uiState.tracks.isNotEmpty()
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showEqualizer by rememberSaveable { mutableStateOf(false) }
     val backgroundBrush = Brush.verticalGradient(
         colors = listOf(
             MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -240,14 +272,18 @@ fun AudioPlayerScreen(
                     actions = {
                         IconButton(onClick = onToggleTheme) {
                             Icon(
-                                imageVector = if (uiState.isNightMode) Icons.Filled.LightMode else Icons.Filled.DarkMode,
-                                contentDescription = if (uiState.isNightMode) "Switch to Light mode" else "Switch to Night mode"
+                                imageVector = themeToggleIcon(uiState.isNightMode),
+                                contentDescription = stringResource(
+                                    if (uiState.isNightMode) R.string.cd_switch_to_light else R.string.cd_switch_to_night
+                                )
                             )
                         }
-                        IconButton(onClick = onChooseFolder) {
+                        // Folder picking lives in the Now Playing card and the empty state, so the
+                        // second app-bar slot holds Settings (three actions would clip the centred title).
+                        IconButton(onClick = { showSettings = true }) {
                             Icon(
-                                imageVector = Icons.Rounded.FolderOpen,
-                                contentDescription = "Choose folder"
+                                imageVector = Icons.Rounded.Settings,
+                                contentDescription = stringResource(R.string.cd_settings)
                             )
                         }
                     }
@@ -279,6 +315,28 @@ fun AudioPlayerScreen(
                         track = currentTrack,
                         sheetState = sheetState,
                         onDismiss = { showDetails = false }
+                    )
+                }
+
+                if (showSettings) {
+                    SettingsSheet(
+                        skipIntervals = uiState.skipIntervals,
+                        onSetSkipBackInterval = onSetSkipBackInterval,
+                        onSetSkipForwardInterval = onSetSkipForwardInterval,
+                        onDismiss = { showSettings = false }
+                    )
+                }
+
+                if (showEqualizer) {
+                    EqualizerSheet(
+                        settings = uiState.equalizer,
+                        onSetEnabled = onSetEqualizerEnabled,
+                        onSelectPreset = onSelectEqualizerPreset,
+                        onSetBand = onSetEqualizerBand,
+                        onSetBassBoost = onSetBassBoost,
+                        onSetLoudness = onSetLoudness,
+                        onReset = onResetEqualizer,
+                        onDismiss = { showEqualizer = false }
                     )
                 }
 
@@ -318,20 +376,25 @@ fun AudioPlayerScreen(
                     isShuffleEnabled = uiState.isShuffleEnabled,
                     repeatMode = uiState.repeatMode,
                     playbackSpeed = uiState.playbackSpeed,
+                    skipIntervals = uiState.skipIntervals,
                     onPlayPause = onPlayPause,
                     onNext = onNext,
                     onPrevious = onPrevious,
                     onStop = onStop,
                     onSeekTo = onSeekTo,
+                    onSkipBack = onSkipBack,
+                    onSkipForward = onSkipForward,
                     onToggleShuffle = onToggleShuffle,
                     onCycleRepeatMode = onCycleRepeatMode,
                     onCyclePlaybackSpeed = onCyclePlaybackSpeed,
-                    onBookmarkTap = onBookmarkTap
+                    onBookmarkTap = onBookmarkTap,
+                    equalizerActive = !uiState.equalizer.isNeutral,
+                    onOpenEqualizer = { showEqualizer = true }
                 )
 
-                if (uiState.bookmarkDialogPositionMs != null) {
+                uiState.bookmarkDraft?.let { draft ->
                     BookmarkDialog(
-                        positionMs = uiState.bookmarkDialogPositionMs,
+                        draft = draft,
                         onSave = onSaveBookmark,
                         onDismiss = onDismissBookmarkDialog
                     )
@@ -392,19 +455,21 @@ private fun NowPlayingCard(
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Text(
-                        text = currentTrack?.title ?: "Select a folder to start",
+                        text = currentTrack?.title ?: stringResource(R.string.now_playing_placeholder),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = when {
-                            isLoading -> "Building your playlist…"
-                            currentTrack == null -> "Tap the folder icon to choose your music."
-                            isPlaying -> "Now playing"
-                            else -> "Ready to play"
-                        },
+                        text = stringResource(
+                            when {
+                                isLoading -> R.string.status_loading
+                                currentTrack == null -> R.string.status_no_track
+                                isPlaying -> R.string.status_playing
+                                else -> R.string.status_ready
+                            }
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -428,7 +493,7 @@ private fun NowPlayingCard(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "Details")
+                    Text(text = stringResource(R.string.action_details))
                 }
                 TextButton(onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -440,7 +505,11 @@ private fun NowPlayingCard(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = if (folderUri == null) "Choose folder" else "Change folder")
+                    Text(
+                        text = stringResource(
+                            if (folderUri == null) R.string.action_choose_folder else R.string.action_change_folder
+                        )
+                    )
                 }
             }
 
@@ -480,13 +549,13 @@ private fun PlaylistSection(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "Playlist",
+                text = stringResource(R.string.playlist_title),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
             if (tracks.isNotEmpty()) {
                 Text(
-                    text = "${tracks.size} tracks",
+                    text = pluralStringResource(R.plurals.playlist_track_count, tracks.size, tracks.size),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -503,32 +572,39 @@ private fun PlaylistSection(
                 PlaylistEmptyState(onChooseFolder = onChooseFolder)
             }
         } else {
-                    val listState = rememberLazyListState()
-                    LaunchedEffect(currentTrackIndex) {
-                        if (currentTrackIndex in tracks.indices) {
-                            listState.animateScrollToItem(currentTrackIndex)
-                        }
+            val listState = rememberLazyListState()
+            LaunchedEffect(currentTrackIndex) {
+                if (currentTrackIndex in tracks.indices) {
+                    // Animating across hundreds of rows (e.g. a shuffle jump) is slow; snap when far away.
+                    if (abs(listState.firstVisibleItemIndex - currentTrackIndex) > MAX_ANIMATED_SCROLL_DISTANCE) {
+                        listState.scrollToItem(currentTrackIndex)
+                    } else {
+                        listState.animateScrollToItem(currentTrackIndex)
                     }
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f, fill = true),
-                        state = listState,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        itemsIndexed(tracks) { index, track ->
-                            PlaylistItem(
-                                index = index,
-                                track = track,
-                                isCurrent = index == currentTrackIndex,
-                                isPlaying = isPlaying && index == currentTrackIndex,
-                                onSelect = { onSelectTrack(index) }
-                            )
-                        }
-                    }
+                }
+            }
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = true),
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                itemsIndexed(tracks, key = { _, track -> track.uri.toString() }) { index, track ->
+                    PlaylistItem(
+                        index = index,
+                        track = track,
+                        isCurrent = index == currentTrackIndex,
+                        isPlaying = isPlaying && index == currentTrackIndex,
+                        onSelect = { onSelectTrack(index) }
+                    )
+                }
+            }
         }
     }
 }
+
+private const val MAX_ANIMATED_SCROLL_DISTANCE = 30
 
 @Composable
 private fun PlaylistItem(
@@ -604,7 +680,7 @@ private fun PlaylistItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = track.uri.lastPathSegment ?: track.uri.toString(),
+                    text = track.relativePath,
                     style = MaterialTheme.typography.bodySmall,
                     color = if (isCurrent) {
                         MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
@@ -648,12 +724,12 @@ private fun PlaylistEmptyState(onChooseFolder: () -> Unit) {
                 modifier = Modifier.size(48.dp)
             )
             Text(
-                text = "Your playlist is waiting",
+                text = stringResource(R.string.empty_title),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "Pick a folder with audio files and we’ll build a playlist automatically.",
+                text = stringResource(R.string.empty_body),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
@@ -662,7 +738,7 @@ private fun PlaylistEmptyState(onChooseFolder: () -> Unit) {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 onChooseFolder()
             }) {
-                Text(text = "Browse folders")
+                Text(text = stringResource(R.string.action_browse_folders))
             }
         }
     }
@@ -678,15 +754,20 @@ private fun PlaybackControls(
     isShuffleEnabled: Boolean,
     repeatMode: Int,
     playbackSpeed: Float,
+    skipIntervals: SkipIntervals,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
     onStop: () -> Unit,
     onSeekTo: (Long) -> Unit,
+    onSkipBack: () -> Unit,
+    onSkipForward: () -> Unit,
     onToggleShuffle: () -> Unit,
     onCycleRepeatMode: () -> Unit,
     onCyclePlaybackSpeed: () -> Unit,
-    onBookmarkTap: () -> Unit
+    onBookmarkTap: () -> Unit,
+    equalizerActive: Boolean,
+    onOpenEqualizer: () -> Unit
 ) {
     var controlsExpanded by rememberSaveable { mutableStateOf(false) }
 
@@ -706,7 +787,9 @@ private fun PlaybackControls(
                 currentPosition = currentPosition,
                 duration = duration,
                 isExpanded = controlsExpanded,
-                onToggleExpanded = { controlsExpanded = !controlsExpanded }
+                onToggleExpanded = { controlsExpanded = !controlsExpanded },
+                equalizerActive = equalizerActive,
+                onOpenEqualizer = onOpenEqualizer
             )
 
             AnimatedVisibility(
@@ -739,11 +822,13 @@ private fun PlaybackControls(
             TransportControls(
                 isPlaying = isPlaying,
                 hasTracks = hasTracks,
-                showStop = controlsExpanded,
+                isExpanded = controlsExpanded,
+                skipIntervals = skipIntervals,
                 onPlayPause = onPlayPause,
                 onNext = onNext,
                 onPrevious = onPrevious,
-                onStop = onStop
+                onSkipBack = onSkipBack,
+                onSkipForward = onSkipForward
             )
 
             AnimatedVisibility(
@@ -759,7 +844,8 @@ private fun PlaybackControls(
                     onToggleShuffle = onToggleShuffle,
                     onCycleRepeatMode = onCycleRepeatMode,
                     onCyclePlaybackSpeed = onCyclePlaybackSpeed,
-                    onBookmarkTap = onBookmarkTap
+                    onBookmarkTap = onBookmarkTap,
+                    onStop = onStop
                 )
             }
         }
@@ -771,28 +857,50 @@ private fun PlaybackControlHeader(
     currentPosition: Long,
     duration: Long,
     isExpanded: Boolean,
-    onToggleExpanded: () -> Unit
+    onToggleExpanded: () -> Unit,
+    equalizerActive: Boolean,
+    onOpenEqualizer: () -> Unit
 ) {
     val safeDuration = duration.takeIf { it > 0L } ?: 0L
     val timeLabel = if (safeDuration > 0L) {
-        "${formatTime(currentPosition.coerceIn(0L, safeDuration))} / ${formatTime(safeDuration)}"
+        stringResource(
+            R.string.time_progress,
+            formatTimestamp(currentPosition.coerceIn(0L, safeDuration)),
+            formatTimestamp(safeDuration)
+        )
     } else {
-        "${formatTime(currentPosition.coerceAtLeast(0L))} / --:--"
+        stringResource(
+            R.string.time_progress,
+            formatTimestamp(currentPosition),
+            stringResource(R.string.time_unknown)
+        )
     }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, top = 10.dp, end = 8.dp),
+            .padding(start = 8.dp, top = 10.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Icon(
-            imageVector = Icons.Rounded.GraphicEq,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp)
-        )
+        // One tap to the equalizer and bass boost; filled while it is shaping the sound.
+        FilledTonalIconButton(
+            onClick = onOpenEqualizer,
+            colors = if (equalizerActive) {
+                IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            } else {
+                IconButtonDefaults.filledTonalIconButtonColors()
+            }
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.GraphicEq,
+                contentDescription = stringResource(R.string.cd_equalizer),
+                modifier = Modifier.size(20.dp)
+            )
+        }
         Text(
             text = timeLabel,
             style = MaterialTheme.typography.labelMedium,
@@ -802,7 +910,9 @@ private fun PlaybackControlHeader(
         IconButton(onClick = onToggleExpanded) {
             Icon(
                 imageVector = if (isExpanded) Icons.Rounded.ExpandMore else Icons.Rounded.ExpandLess,
-                contentDescription = if (isExpanded) "Minimize controls" else "Maximize controls",
+                contentDescription = stringResource(
+                    if (isExpanded) R.string.cd_minimize_controls else R.string.cd_maximize_controls
+                ),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -813,46 +923,52 @@ private fun PlaybackControlHeader(
 private fun TransportControls(
     isPlaying: Boolean,
     hasTracks: Boolean,
-    showStop: Boolean,
+    isExpanded: Boolean,
+    skipIntervals: SkipIntervals,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
-    onStop: () -> Unit
+    onSkipBack: () -> Unit,
+    onSkipForward: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
-    val controlSize = if (showStop) 48.dp else 44.dp
-    val playSize = if (showStop) 56.dp else 52.dp
-    val playIconSize = if (showStop) 28.dp else 26.dp
+    val controlSize = if (isExpanded) 48.dp else 44.dp
+    val playSize = if (isExpanded) 56.dp else 52.dp
+    val playIconSize = if (isExpanded) 28.dp else 26.dp
 
+    // Five controls at 8 dp spacing stay within a 360 dp-wide screen even when expanded.
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 12.dp, end = 12.dp, bottom = if (showStop) 0.dp else 12.dp),
+            .padding(start = 12.dp, end = 12.dp, bottom = if (isExpanded) 0.dp else 12.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             FilledTonalIconButton(
                 onClick = {
-                    if (hasTracks) {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onPrevious()
-                    }
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onPrevious()
                 },
                 enabled = hasTracks,
                 modifier = Modifier.size(controlSize)
             ) {
-                Icon(imageVector = Icons.Rounded.SkipPrevious, contentDescription = "Previous")
+                Icon(imageVector = Icons.Rounded.SkipPrevious, contentDescription = stringResource(R.string.cd_previous))
             }
+            SkipButton(
+                intervalMs = skipIntervals.backMs,
+                forward = false,
+                enabled = hasTracks,
+                size = controlSize,
+                onClick = onSkipBack
+            )
             FilledIconButton(
                 onClick = {
-                    if (hasTracks) {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onPlayPause()
-                    }
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onPlayPause()
                 },
                 enabled = hasTracks,
                 modifier = Modifier.size(playSize),
@@ -865,36 +981,74 @@ private fun TransportControls(
             ) {
                 Icon(
                     imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    contentDescription = stringResource(if (isPlaying) R.string.cd_pause else R.string.cd_play),
                     modifier = Modifier.size(playIconSize)
                 )
             }
+            SkipButton(
+                intervalMs = skipIntervals.forwardMs,
+                forward = true,
+                enabled = hasTracks,
+                size = controlSize,
+                onClick = onSkipForward
+            )
             FilledTonalIconButton(
                 onClick = {
-                    if (hasTracks) {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onNext()
-                    }
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onNext()
                 },
                 enabled = hasTracks,
                 modifier = Modifier.size(controlSize)
             ) {
-                Icon(imageVector = Icons.Rounded.SkipNext, contentDescription = "Next")
+                Icon(imageVector = Icons.Rounded.SkipNext, contentDescription = stringResource(R.string.cd_next))
             }
-            if (showStop) {
-                FilledTonalIconButton(
-                    onClick = {
-                        if (hasTracks) {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onStop()
-                        }
-                    },
-                    enabled = hasTracks,
-                    modifier = Modifier.size(controlSize)
-                ) {
-                    Icon(imageVector = Icons.Rounded.Stop, contentDescription = "Stop")
-                }
-            }
+        }
+    }
+}
+
+/**
+ * Circular-arrow skip button with the step in seconds drawn inside, like Material's replay_10 /
+ * forward_10 (which only exist for some steps). The digits are sized in dp, not sp, so large font
+ * settings cannot push them out of the circle; TalkBack reads the full description instead.
+ */
+@Composable
+private fun SkipButton(
+    intervalMs: Long,
+    forward: Boolean,
+    enabled: Boolean,
+    size: Dp,
+    onClick: () -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    val description = skipIntervalDescription(LocalContext.current.resources, intervalMs, forward)
+    val digitSize = with(LocalDensity.current) { 10.dp.toSp() }
+    IconButton(
+        onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            onClick()
+        },
+        enabled = enabled,
+        modifier = Modifier
+            .size(size)
+            .semantics { contentDescription = description }
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = Icons.Rounded.Replay,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(34.dp)
+                    // Mirrored, the replay arrow is Material's forward arrow.
+                    .graphicsLayer { if (forward) scaleX = -1f }
+            )
+            Text(
+                text = (intervalMs / 1_000L).toString(),
+                fontSize = digitSize,
+                lineHeight = digitSize,
+                fontWeight = FontWeight.Bold,
+                // The arrow's circle sits slightly below the icon's centre.
+                modifier = Modifier.padding(top = 3.dp)
+            )
         }
     }
 }
@@ -908,7 +1062,8 @@ private fun SecondaryPlaybackControls(
     onToggleShuffle: () -> Unit,
     onCycleRepeatMode: () -> Unit,
     onCyclePlaybackSpeed: () -> Unit,
-    onBookmarkTap: () -> Unit
+    onBookmarkTap: () -> Unit,
+    onStop: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
 
@@ -933,16 +1088,14 @@ private fun SecondaryPlaybackControls(
         )
         FilledTonalIconButton(
             onClick = {
-                if (hasTracks) {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onToggleShuffle()
-                }
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onToggleShuffle()
             },
             enabled = hasTracks,
             colors = shuffleColors,
             modifier = Modifier.size(44.dp)
         ) {
-            Icon(imageVector = Icons.Rounded.Shuffle, contentDescription = "Toggle shuffle")
+            Icon(imageVector = Icons.Rounded.Shuffle, contentDescription = stringResource(R.string.cd_toggle_shuffle))
         }
 
         val repeatSelected = repeatMode != Player.REPEAT_MODE_OFF
@@ -964,25 +1117,20 @@ private fun SecondaryPlaybackControls(
         }
         FilledTonalIconButton(
             onClick = {
-                if (hasTracks) {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onCycleRepeatMode()
-                }
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onCycleRepeatMode()
             },
             enabled = hasTracks,
             colors = repeatColors,
             modifier = Modifier.size(44.dp)
         ) {
-            Icon(imageVector = repeatIcon, contentDescription = "Cycle repeat mode")
+            Icon(imageVector = repeatIcon, contentDescription = stringResource(R.string.cd_cycle_repeat))
         }
 
-        val speedLabel = String.format(Locale.getDefault(), "%.1fx", playbackSpeed)
         TextButton(
             onClick = {
-                if (hasTracks) {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onCyclePlaybackSpeed()
-                }
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onCyclePlaybackSpeed()
             },
             enabled = hasTracks
         ) {
@@ -992,20 +1140,30 @@ private fun SecondaryPlaybackControls(
                 modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(4.dp))
-            Text(text = speedLabel)
+            Text(text = formatPlaybackSpeed(playbackSpeed))
         }
 
         FilledTonalIconButton(
             onClick = {
-                if (hasTracks) {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onBookmarkTap()
-                }
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onBookmarkTap()
             },
             enabled = hasTracks,
             modifier = Modifier.size(44.dp)
         ) {
-            Icon(imageVector = Icons.Rounded.BookmarkAdd, contentDescription = "Add bookmark")
+            Icon(imageVector = Icons.Rounded.BookmarkAdd, contentDescription = stringResource(R.string.cd_add_bookmark))
+        }
+
+        // Stop moved here from the transport row, which now holds the skip buttons.
+        FilledTonalIconButton(
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onStop()
+            },
+            enabled = hasTracks,
+            modifier = Modifier.size(44.dp)
+        ) {
+            Icon(imageVector = Icons.Rounded.Stop, contentDescription = stringResource(R.string.cd_stop))
         }
     }
 }
@@ -1158,12 +1316,12 @@ private fun PlaybackProgressScrubber(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = formatTime(displayPosition),
+                text = formatTimestamp(displayPosition),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                text = if (safeDuration > 0L) formatTime(safeDuration) else "--:--",
+                text = if (safeDuration > 0L) formatTimestamp(safeDuration) else stringResource(R.string.time_unknown),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1183,41 +1341,46 @@ private fun progressFraction(position: Long, duration: Long): Float =
 
 @Composable
 private fun BookmarkDialog(
-    positionMs: Long,
-    onSave: (Long, String?) -> Unit,
+    draft: BookmarkDraft,
+    onSave: (String?) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var noteText by rememberSaveable { mutableStateOf("") }
+    var noteText by rememberSaveable(draft) { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(text = "Add Bookmark") },
+        title = { Text(text = stringResource(R.string.bookmark_dialog_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "Position: ${formatTimestamp(positionMs)}",
+                    text = draft.trackTitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = stringResource(R.string.bookmark_dialog_position, formatTimestamp(draft.positionMs)),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 OutlinedTextField(
                     value = noteText,
                     onValueChange = { noteText = it },
-                    label = { Text("Note (optional)") },
+                    label = { Text(stringResource(R.string.bookmark_note_label)) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                onSave(positionMs, noteText.takeIf { it.isNotBlank() })
-            }) {
-                Text("Save")
+            TextButton(onClick = { onSave(noteText.takeIf { it.isNotBlank() }) }) {
+                Text(stringResource(R.string.action_save))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.action_cancel))
             }
         }
     )
@@ -1251,19 +1414,21 @@ private fun TimestampListSection(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "Bookmarks",
+                    text = stringResource(R.string.bookmarks_title),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "${timestamps.size}",
+                    text = timestamps.size.toString(),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Icon(
                 imageVector = if (isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                contentDescription = if (isExpanded) "Collapse bookmarks" else "Expand bookmarks",
+                contentDescription = stringResource(
+                    if (isExpanded) R.string.cd_collapse_bookmarks else R.string.cd_expand_bookmarks
+                ),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -1273,7 +1438,13 @@ private fun TimestampListSection(
             enter = expandVertically(),
             exit = shrinkVertically()
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+            // Bounded and scrollable so a long list cannot push the playlist and controls off screen.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 220.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 timestamps.forEach { bookmark ->
                     Row(
                         modifier = Modifier
@@ -1303,12 +1474,96 @@ private fun TimestampListSection(
                         IconButton(onClick = { onDeleteTimestamp(bookmark.id) }) {
                             Icon(
                                 imageVector = Icons.Rounded.Delete,
-                                contentDescription = "Delete bookmark",
+                                contentDescription = stringResource(R.string.cd_delete_bookmark),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsSheet(
+    skipIntervals: SkipIntervals,
+    onSetSkipBackInterval: (Long) -> Unit,
+    onSetSkipForwardInterval: (Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.settings_title),
+                style = MaterialTheme.typography.titleLarge
+            )
+            SkipIntervalSetting(
+                label = stringResource(R.string.settings_skip_back),
+                selectedMs = skipIntervals.backMs,
+                onSelect = onSetSkipBackInterval
+            )
+            SkipIntervalSetting(
+                label = stringResource(R.string.settings_skip_forward),
+                selectedMs = skipIntervals.forwardMs,
+                onSelect = onSetSkipForwardInterval
+            )
+            Text(
+                text = stringResource(R.string.settings_skip_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SkipIntervalSetting(
+    label: String,
+    selectedMs: Long,
+    onSelect: (Long) -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        SingleChoiceSegmentedButtonRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = label }
+        ) {
+            SKIP_INTERVAL_OPTIONS_MS.forEachIndexed { index, option ->
+                SegmentedButton(
+                    selected = option == selectedMs,
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onSelect(option)
+                    },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = SKIP_INTERVAL_OPTIONS_MS.size)
+                ) {
+                    val parts = skipIntervalLabel(option)
+                    Text(
+                        text = stringResource(
+                            if (parts.inMinutes) R.string.skip_interval_minutes else R.string.skip_interval_seconds,
+                            parts.amount
+                        ),
+                        maxLines = 1
+                    )
                 }
             }
         }
@@ -1333,25 +1588,25 @@ private fun TrackDetailsSheet(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
-                text = "Track details",
+                text = stringResource(R.string.details_title),
                 style = MaterialTheme.typography.titleLarge
             )
-            DetailRow(label = "Title", value = track.title)
+            DetailRow(label = stringResource(R.string.details_label_title), value = track.title)
             track.artist?.let { artist ->
-                DetailRow(label = "Artist", value = artist)
+                DetailRow(label = stringResource(R.string.details_label_artist), value = artist)
             }
             track.album?.let { album ->
-                DetailRow(label = "Album", value = album)
+                DetailRow(label = stringResource(R.string.details_label_album), value = album)
             }
             track.durationMs?.let { duration ->
-                DetailRow(label = "Duration", value = formatTime(duration))
+                DetailRow(label = stringResource(R.string.details_label_duration), value = formatTimestamp(duration))
             }
             track.fileSizeBytes?.let { size ->
                 formatFileSize(size)?.let { readable ->
-                    DetailRow(label = "File size", value = readable)
+                    DetailRow(label = stringResource(R.string.details_label_file_size), value = readable)
                 }
             }
-            DetailRow(label = "Source", value = track.uri.toString())
+            DetailRow(label = stringResource(R.string.details_label_location), value = track.relativePath)
             Spacer(modifier = Modifier.height(8.dp))
         }
     }
@@ -1371,19 +1626,6 @@ private fun DetailRow(label: String, value: String) {
             color = MaterialTheme.colorScheme.onSurface
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
-    }
-}
-
-private fun formatTime(positionMs: Long): String {
-    if (positionMs <= 0L) return "0:00"
-    val totalSeconds = positionMs / 1000
-    val seconds = (totalSeconds % 60).toInt()
-    val minutes = ((totalSeconds / 60) % 60).toInt()
-    val hours = (totalSeconds / 3600).toInt()
-    return if (hours > 0) {
-        String.format(Locale.getDefault(), "%d:%02d:%02d", hours, minutes, seconds)
-    } else {
-        String.format(Locale.getDefault(), "%d:%02d", totalSeconds / 60, seconds)
     }
 }
 
@@ -1410,6 +1652,7 @@ private fun AudioPlayerScreenPreview() {
                     AudioTrack(
                         title = "Lo-fi Vibes",
                         uri = Uri.parse("content://demo/lofi"),
+                        relativePath = "Late Night/01 Lo-fi Vibes.mp3",
                         artist = "Loft Beats",
                         album = "Late Night",
                         durationMs = 180_000L,
@@ -1418,6 +1661,7 @@ private fun AudioPlayerScreenPreview() {
                     AudioTrack(
                         title = "Ocean Echoes",
                         uri = Uri.parse("content://demo/ocean"),
+                        relativePath = "Blue/02 Ocean Echoes.mp3",
                         artist = "Tide",
                         album = "Blue",
                         durationMs = 200_000L,
@@ -1426,6 +1670,7 @@ private fun AudioPlayerScreenPreview() {
                     AudioTrack(
                         title = "Night Walk",
                         uri = Uri.parse("content://demo/night"),
+                        relativePath = "Midnight/03 Night Walk.mp3",
                         artist = "City Lights",
                         album = "Midnight",
                         durationMs = 220_000L,
@@ -1448,12 +1693,16 @@ private fun AudioPlayerScreenPreview() {
             onStop = {},
             onSelectTrack = {},
             onSeekTo = {},
+            onSkipBack = {},
+            onSkipForward = {},
             onToggleShuffle = {},
             onCycleRepeatMode = {},
             onCyclePlaybackSpeed = {},
             onToggleTheme = {},
+            onSetSkipBackInterval = {},
+            onSetSkipForwardInterval = {},
             onBookmarkTap = {},
-            onSaveBookmark = { _, _ -> },
+            onSaveBookmark = {},
             onDismissBookmarkDialog = {},
             onSeekToTimestamp = {},
             onDeleteTimestamp = {}

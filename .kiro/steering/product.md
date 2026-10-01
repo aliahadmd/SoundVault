@@ -1,18 +1,32 @@
 # Product Overview
 
-Audio Player is a personal Android audio playback app. It lets the user pick a folder from device storage and automatically builds a playlist from the audio files inside (including subfolders).
+SoundVault is a personal Android audio playback app. The user picks a folder from device storage and it builds a
+playlist from the audio files inside (including subfolders).
 
 ## Core Features
-- Folder-based playlist generation (recursive scan, sorted alphabetically)
-- Persistent playback state: folder, track, position, shuffle, repeat, and speed are restored on relaunch
-- Background playback via a foreground media service with lockscreen/notification controls
-- Shuffle, repeat (off / all / one), and variable playback speed (0.75×–2.0×)
-- Track detail bottom sheet showing metadata (artist, album, duration, file size)
-- Haptic feedback on key interactions
-- Auto-scroll playlist to keep the active track visible
+- Folder-based playlist generation (recursive scan, natural order by path: "Track 2" before "Track 10")
+- Persistent playback state: folder, track, position, shuffle, repeat and speed are restored on relaunch
+- Background playback via a Media3 media session service with notification / lock-screen controls that stay available while paused
+- Audio focus (pauses for calls and other media) and pausing when headphones are unplugged
+- Shuffle, repeat (off / all / one), and playback speed presets 0.75× – 2.0×
+- Skip back / skip forward by 5 s, 10 s, 20 s or 1 min, chosen separately per direction in the Settings sheet
+  (default 10 s); the notification, lock screen and headset rewind / fast-forward keys use the same steps
+- Equalizer with a bass booster, opened from the bars button in the player controls: one big bass boost control
+  (0–100 %, with Off / Low / Mid / High / Max shortcuts), loudness, 16 presets (Flat, Bass Boost, Subwoofer, Deep Bass,
+  Bass & Treble, Hip-Hop, Dance, Rock, Pop, Jazz, Classical, Acoustic, Vocal, Treble Boost, Loudness, Phone Speaker;
+  "Custom" once a band is edited) and a 10-band graphic EQ (31 Hz – 16 kHz, ±12 dB). It is processed inside the app's
+  own player, so it works on every device and does not depend on Android's per-device audio effects. Output is
+  protected by automatic pre-gain and a limiter, so heavy bass does not clip. Settings persist; moving any control
+  switches it on
+- Timestamp bookmarks with optional notes, per track and folder
+- Light / Night themes (Night by default), toggled in the app bar
+- Track detail bottom sheet (artist, album, duration, file size, location)
+- Haptic feedback on key interactions and auto-scroll to the active track
+- Unplayable files are reported and skipped
 
 ## Supported Audio Formats
-mp3, wav, m4a, aac, ogg, flac
+mp3, wav, m4a, aac, ogg/oga, opus, flac (plus other files the provider reports as `audio/*`). Playlist files
+(m3u, m3u8, pls, cue, …) and hidden or trashed files are ignored.
 
 ## Target Audience
 Single-user personal app — no accounts, no network, no cloud sync.

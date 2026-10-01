@@ -11,8 +11,11 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.media3.common.Player
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import java.io.IOException
 
 private val Context.playerPreferencesDataStore by preferencesDataStore(name = "player_preferences")
 
@@ -26,11 +29,20 @@ data class PlayerPreferencesData(
     val isNightMode: Boolean = true
 )
 
+/** Playback state owned and written by [PlaybackService]. */
+data class PlaybackSnapshot(
+    val trackUri: String?,
+    val positionMs: Long,
+    val shuffleEnabled: Boolean,
+    val repeatMode: Int,
+    val playbackSpeed: Float
+)
+
 class PlayerPreferences(context: Context) {
 
-    private val dataStore = context.playerPreferencesDataStore
+    private val dataStore = context.applicationContext.playerPreferencesDataStore
 
-    val preferencesFlow: Flow<PlayerPreferencesData> = dataStore.data.map { preferences ->
+    private val preferencesFlow: Flow<PlayerPreferencesData> = dataStore.data.map { preferences ->
         PlayerPreferencesData(
             folderUri = preferences[FOLDER_URI_KEY],
             currentTrackUri = preferences[CURRENT_TRACK_URI_KEY],
@@ -44,34 +56,85 @@ class PlayerPreferences(context: Context) {
 
     suspend fun getPreferences(): PlayerPreferencesData = preferencesFlow.first()
 
-    suspend fun saveState(
-        folderUri: Uri?,
-        trackUri: Uri?,
-        positionMs: Long,
-        shuffleEnabled: Boolean,
-        repeatMode: Int,
-        playbackSpeed: Float
-    ) {
+    /**
+     * Skip step sizes, observed by both the UI and [PlaybackService]. Unknown stored values fall back to
+     * the default, and a read error emits the defaults instead of failing the collector.
+     */
+    val skipIntervals: Flow<SkipIntervals> = dataStore.data
+        .map { preferences ->
+            SkipIntervals(
+                backMs = sanitizeSkipInterval(preferences[SKIP_BACK_MS_KEY]),
+                forwardMs = sanitizeSkipInterval(preferences[SKIP_FORWARD_MS_KEY])
+            )
+        }
+        .catch { error ->
+            if (error !is IOException) throw error
+            emit(SkipIntervals())
+        }
+        .distinctUntilChanged()
+
+    suspend fun saveSkipBackInterval(intervalMs: Long) {
+        dataStore.edit { preferences -> preferences[SKIP_BACK_MS_KEY] = sanitizeSkipInterval(intervalMs) }
+    }
+
+    suspend fun saveSkipForwardInterval(intervalMs: Long) {
+        dataStore.edit { preferences -> preferences[SKIP_FORWARD_MS_KEY] = sanitizeSkipInterval(intervalMs) }
+    }
+
+    /**
+     * Equalizer and bass booster state, observed by [PlaybackService] (which applies it to the audio) and
+     * by the UI. Stored values are repaired on read, and a read error emits the neutral defaults.
+     */
+    val equalizer: Flow<EqualizerSettings> = dataStore.data
+        .map { preferences ->
+            sanitizeEqualizerSettings(
+                EqualizerSettings(
+                    enabled = preferences[EQ_ENABLED_KEY] ?: true,
+                    presetId = preferences[EQ_PRESET_KEY] ?: EqPreset.FLAT.id,
+                    bandGainsDb = decodeBandGains(preferences[EQ_BANDS_KEY]),
+                    bassBoostPercent = preferences[EQ_BASS_BOOST_KEY] ?: 0,
+                    loudnessPercent = preferences[EQ_LOUDNESS_KEY] ?: 0
+                )
+            )
+        }
+        .catch { error ->
+            if (error !is IOException) throw error
+            emit(EqualizerSettings())
+        }
+        .distinctUntilChanged()
+
+    suspend fun saveEqualizer(settings: EqualizerSettings) {
+        val sanitized = sanitizeEqualizerSettings(settings)
         dataStore.edit { preferences ->
-            if (folderUri == null) {
-                preferences.remove(FOLDER_URI_KEY)
-            } else {
-                preferences[FOLDER_URI_KEY] = folderUri.toString()
-            }
-            if (trackUri == null) {
-                preferences.remove(CURRENT_TRACK_URI_KEY)
-            } else {
-                preferences[CURRENT_TRACK_URI_KEY] = trackUri.toString()
-            }
-            preferences[POSITION_MS_KEY] = positionMs
-            preferences[SHUFFLE_ENABLED_KEY] = shuffleEnabled
-            preferences[REPEAT_MODE_KEY] = repeatMode
-            preferences[PLAYBACK_SPEED_KEY] = playbackSpeed
+            preferences[EQ_ENABLED_KEY] = sanitized.enabled
+            preferences[EQ_PRESET_KEY] = sanitized.presetId
+            preferences[EQ_BANDS_KEY] = encodeBandGains(sanitized.bandGainsDb)
+            preferences[EQ_BASS_BOOST_KEY] = sanitized.bassBoostPercent
+            preferences[EQ_LOUDNESS_KEY] = sanitized.loudnessPercent
         }
     }
 
-    suspend fun clear() {
-        dataStore.edit { it.clear() }
+    /** Saves the selected folder and resets the track/position so a new folder starts at its top. */
+    suspend fun saveFolder(folderUri: Uri) {
+        dataStore.edit { preferences ->
+            preferences[FOLDER_URI_KEY] = folderUri.toString()
+            preferences.remove(CURRENT_TRACK_URI_KEY)
+            preferences[POSITION_MS_KEY] = 0L
+        }
+    }
+
+    suspend fun savePlaybackState(snapshot: PlaybackSnapshot) {
+        dataStore.edit { preferences ->
+            if (snapshot.trackUri == null) {
+                preferences.remove(CURRENT_TRACK_URI_KEY)
+            } else {
+                preferences[CURRENT_TRACK_URI_KEY] = snapshot.trackUri
+            }
+            preferences[POSITION_MS_KEY] = snapshot.positionMs
+            preferences[SHUFFLE_ENABLED_KEY] = snapshot.shuffleEnabled
+            preferences[REPEAT_MODE_KEY] = snapshot.repeatMode
+            preferences[PLAYBACK_SPEED_KEY] = snapshot.playbackSpeed
+        }
     }
 
     suspend fun clearPlaybackState() {
@@ -99,5 +162,12 @@ class PlayerPreferences(context: Context) {
         val REPEAT_MODE_KEY = intPreferencesKey("repeat_mode")
         val PLAYBACK_SPEED_KEY = floatPreferencesKey("playback_speed")
         val IS_NIGHT_MODE_KEY = booleanPreferencesKey("is_night_mode")
+        val SKIP_BACK_MS_KEY = longPreferencesKey("skip_back_ms")
+        val SKIP_FORWARD_MS_KEY = longPreferencesKey("skip_forward_ms")
+        val EQ_ENABLED_KEY = booleanPreferencesKey("eq_enabled")
+        val EQ_PRESET_KEY = stringPreferencesKey("eq_preset")
+        val EQ_BANDS_KEY = stringPreferencesKey("eq_band_gains_db")
+        val EQ_BASS_BOOST_KEY = intPreferencesKey("eq_bass_boost_percent")
+        val EQ_LOUDNESS_KEY = intPreferencesKey("eq_loudness_percent")
     }
 }

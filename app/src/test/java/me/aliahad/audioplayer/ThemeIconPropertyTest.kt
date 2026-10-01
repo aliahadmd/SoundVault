@@ -14,15 +14,8 @@ class ThemeIconPropertyTest : FunSpec({
 
     test("Theme icon is sun (LightMode) when isNightMode is true, moon (DarkMode) when false") {
         forAll(Arb.boolean()) { isNightMode ->
-            // Mirror the icon selection logic from MainActivity.kt:
-            // imageVector = if (uiState.isNightMode) Icons.Filled.LightMode else Icons.Filled.DarkMode
-            val selectedIcon = if (isNightMode) Icons.Filled.LightMode else Icons.Filled.DarkMode
-
-            if (isNightMode) {
-                selectedIcon == Icons.Filled.LightMode
-            } else {
-                selectedIcon == Icons.Filled.DarkMode
-            }
+            val expected = if (isNightMode) Icons.Filled.LightMode else Icons.Filled.DarkMode
+            themeToggleIcon(isNightMode) == expected
         }
     }
 })
